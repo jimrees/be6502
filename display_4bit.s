@@ -4,6 +4,10 @@ PORTA = $6001
 DDRB = $6002
 DDRA = $6003
 
+;;; Pre-allocate storage for decimal formatter
+value = $0200
+mod10 = $0202
+
 ;;; Display control bits - where they live on PORTB
 E  = %01000000
 RW = %00100000
@@ -17,9 +21,12 @@ SERIAL_LOC = $f0
 ;;; The rom is mapped to start at $8000
         .org $8000
 
+;;; The test value of the number to print in decimal
+number:  .word 31415
+
 ;;; String to display on LCD.  Note padding to 40 characters - this
 ;;; is how to wrap around to the second row.
-message:        asciiz "Hello, world!                           Suck it, wires!"
+message:        asciiz "Hello, world!                           "
 
 ;;; lcd_wait should be safe in either 8-bit or 4-bit modes
 ;;; In 8-bit mode, we are pulling only the high 4 bits anyway
@@ -173,6 +180,67 @@ mloopstart:
         inx
         jmp mloopstart
 mloopend:
+
+        ;; Print number in decimal
+        ;; Initialize value to the number to be converted
+        lda number
+        sta value
+        lda number + 1
+        sta value + 1
+        lda #0                  ; push a null char on the stack
+        pha
+
+divide:
+        ;; Initialize remainder to zero
+        lda #0
+        sta mod10
+        sta mod10 + 1
+        clc
+
+        ldx #16
+divloop:
+        ;; Rotate quotient & remainder
+        rol value
+        rol value + 1
+        rol mod10
+        rol mod10 + 1
+
+        ;;  a,y = dividend - divisor
+        sec
+        lda mod10
+        sbc #10
+        tay                     ; stash low byte in y
+        lda mod10 + 1
+        sbc #0
+        bcc ignore_result       ; dividend < divisor
+        sty mod10
+        sta mod10 + 1
+ignore_result:
+        dex
+        bne divloop
+
+        rol value               ; final rotate
+        rol value+1
+
+        lda mod10
+
+        clc
+        adc #"0"
+        pha
+
+        ;; are we done?
+        lda value
+        ora value+1
+        bne divide
+
+        pla                     ; we know there's at least one
+unfold_print_loop:
+        jsr print_character
+        pla                     ; pop the next one
+        bne unfold_print_loop   ; if not-null, keep looping
+
+        lda #" "
+        jsr print_character
 
         ;; Print a digit at the end of the message that increments
         ;; on each reset cycle, so that when it's printed we'll
