@@ -3,20 +3,18 @@ PORTB = $6000
 PORTA = $6001
 DDRB = $6002
 DDRA = $6003
-
+PCR = $600C       ; [ CB2{3} | CB1{1} | CA2{3} | CA1{1} | PCR ]
+IFR = $600D       ; [ IRQ TIMER1 TIMER2 CB1 CB2 SHIFTREG CA1 CA2 ]
+IER = $600E       ; [ Set/Clr TIMER1 TIMER2 CB1 CB2 SR CA1 CA2 ]
 ;;; Pre-allocate storage for decimal formatter
 value = $0200
 mod10 = $0202
+counter = $0204
 
 ;;; Display control bits - where they live on PORTB
 E  = %01000000
 RW = %00100000
 RS = %00010000
-
-;;; Used to confirm that the program actually does something on a
-;;; reset.  This is incremented on each run, so we print something
-;;; new each pass.
-SERIAL_LOC = $f0
 
 ;;; The rom is mapped to start at $8000
         .org $8000
@@ -122,6 +120,10 @@ update_led_on_x_change:
         rts
 
 reset:
+        lda #0
+        sta counter
+        sta counter + 1
+
         ;; Set the data direction bits for the ports
         lda #%11111111
         sta DDRB
@@ -135,14 +137,13 @@ reset:
         ;; at 1MHz, ~0.2 seconds
         ldx #$7f
         jsr update_led_on_x_change ; blink LED
-spin_outerx:
         ldy #$ff
-spin_innery:
+spin:
         dey                     ; 2 cycles
-        bne spin_innery         ; 3 cycles - branch is taken
+        bne spin                ; 3 cycles - branch is taken
         dex
         jsr update_led_on_x_change ; blink LED
-        bne spin_outerx
+        bne spin
 
         ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -168,6 +169,16 @@ spin_innery:
         lda #%00000001          ; clear screen
         jsr lcd_instruction
 
+        lda #%00000000
+        sta PCR                 ; negative active edge for CA1
+
+        lda #%10000010          ; enable CA1 interrupts
+        sta IER
+        cli
+loop:
+        lda #%00000010          ; home
+        jsr lcd_instruction
+
         ;; Print the message, it's too bad there's no obvious
         ;; way to pass an address of a message to a general print
         ;; routine - the address byte could be stored on the stack
@@ -183,10 +194,14 @@ mloopend:
 
         ;; Print number in decimal
         ;; Initialize value to the number to be converted
-        lda number
+        ;; Grab counter *atomically* with interrupts disabled
+        ;; so we only get a consistent value
+        sei                     ; disable interrupts
+        lda counter
+        ldy counter + 1
+        cli                     ; re-enable interrupts
         sta value
-        lda number + 1
-        sta value + 1
+        sty value + 1
         lda #0                  ; push a null char on the stack
         pha
 
@@ -239,25 +254,43 @@ unfold_print_loop:
         pla                     ; pop the next one
         bne unfold_print_loop   ; if not-null, keep looping
 
-        lda #" "
-        jsr print_character
-
-        ;; Print a digit at the end of the message that increments
-        ;; on each reset cycle, so that when it's printed we'll
-        ;; know that everything was re-printed and it wasn't just stuck
-        clc
-        lda SERIAL_LOC
-        and #7
-        adc #"0"
-        jsr print_character
-        inc SERIAL_LOC
+        jmp loop
 
 nothing_more_to_do:
         jmp nothing_more_to_do
 
+nmi:
+        inc counter
+        bne exit_nmi
+        inc counter + 1
+exit_nmi:
+        rti
+
+irq:
+        phx
+        phy
+
+        inc counter
+        bne exit_irq
+        inc counter + 1
+exit_irq:
+
+        ldy #$6f
+        ldx #$ff
+debounce_delay:
+        dex
+        bne debounce_delay
+        dey
+        bne debounce_delay
+
+        bit PORTA               ; clears the interrupt?
+        ply
+        plx
+        rti
+
         ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
         ;; The interrupt & reset vectors
         .org $fffa
-        .word $0000
+        .word nmi
         .word reset
-        .word $0000
+        .word irq
