@@ -1,6 +1,9 @@
 
 %.bin: %.s
-	vasm -wdc02 -dotdir -Fbin -o $@ $<
+	vasm -L $*.list -wdc02 -dotdir -Fbin -o $@ $<
+
+%.list: %.bin
+	@true
 
 %.burn: %.bin
 	minipro -u -p AT28C256 -w $<
@@ -12,4 +15,4 @@
 .PRECIOUS: %.bin
 
 clean:
-	$(RM) *.bin
+	$(RM) *.bin *.list

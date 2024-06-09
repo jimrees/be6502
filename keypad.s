@@ -32,13 +32,9 @@ clicksuntilca1_reenable = $00   ; 1 byte allocate from zeropage
 ;;; 0, else move to state 1 (if we need more states, they behave just like state 2)
 numericpadstate = $01
 
-;;; Temporary variable needed because 3 registers is not enough
-bitvar = $02
-columnmask = $03
-
 ;;; Track how many chars printed.  When we reach 16, then switch to scrolling
 ;;; mode.  That has other weird side effects on the two rows.
-charsprinted = $04
+charsprinted = $02
 
 ;;; Display control bits - where they live on PORTB
 E  = %01000000
@@ -62,6 +58,10 @@ RS = %00010000
 ;;; is how to wrap around to the second row.
 ;;; message:        asciiz "Hello, world!                           "
 
+;;; The characters on the membrane pad.  Indexes into this are pushed
+;;; onto the stack, and the 0 index is reserved to be the terminator
+;;; hence, this has 17 chars in it.
+;;; (we could have referenced it via (rc_chars-1))
 rc_chars:        .byte "147*2580369#ABCD"
 
 ;;; lcd_wait should be safe in either 8-bit or 4-bit modes
@@ -126,7 +126,6 @@ lcd_instruction:
         rts
 
 print_character:
-        pha
         jsr lcd_wait
         pha                     ; save A
         lsr                     ; downshift for high nibble
@@ -149,7 +148,6 @@ print_character:
         lda #%00000111          ; inc/shift cursor, display shift
         jsr lcd_instruction
 pc_done:
-        pla                     ; preserve argument
         rts
 
 ;;; value must contain the number
@@ -307,28 +305,31 @@ loop:
         ldx #0
         phx
         ;; Set up the initial column mask, with ONE bit low
-        lda #%11101111          ; column 0 setup, a single 0 bit
-        sta columnmask
+        ;; This will be shifted left on each pass, and when carry == 0
+        ;; as a result of the final shift, we are done.
+        ;; Likewise below, the rowmask will start as #%1111xyzw
+        ;; and be shifted right with lsr.  We detect the end of that
+        ;; loop by checking (rowmask & #x11110000) == 0
+        ldy #%11101111          ; column 0 setup, a single 0 bit
 
 column_loop:
-        lda columnmask
-        sta PORTA               ; assert just the one bit low
-
-        ldy #4                  ; set up loop counter
+        sty PORTA               ; assert just the one bit low
         lda PORTA               ; read the state
-        sta bitvar              ; save in bitvar (we are out of registers)
-row_loop:
-        ror bitvar              ; Move the next bit into carry
-        bcs not_pressed         ; if carry set, then this key is not pressed
-        lda rc_chars,x          ; else fetch the char and push
-        pha
-not_pressed:
-        inx                     ; increment the index
-        dey                     ; decrement the 4-bit counter
-        bne row_loop            ; ..and loop
+        ora #$f0                ; set the high bits
 
-        rol columnmask          ; shift the mask left
-        bcs column_loop         ; when the zero hits carry, we're done
+row_loop:
+        inx                     ; increment the index
+        lsr                     ; Move the next bit into carry
+        bcs not_pressed         ; if carry set, then this key is not pressed
+        phx                     ; save the index
+not_pressed:
+        bit #$f0                ; test the high bits
+        bne row_loop            ; continue if we haven't shifted in four 0s
+
+        tya                     ; grab the column mask
+        asl                     ; shift left
+        tay                     ; save updated column mask
+        bcs column_loop         ; If C==0, we're done
 
         ;; Now process what we scanned, depending on the current
         ;; state.
@@ -341,11 +342,12 @@ not_pressed:
 
         lda numericpadstate
         bne not_state_0
-        pla
+        plx
         beq skip_print          ; and stay in state0
 unfold_print_loop2:
+        lda rc_chars-1,x        ; account for the 1 offset
         jsr print_character
-        pla
+        plx
         bne unfold_print_loop2
         lda #1
         sta numericpadstate
