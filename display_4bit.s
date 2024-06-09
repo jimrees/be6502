@@ -288,9 +288,49 @@ mloopend:
         lda #" "
         jsr print_character
         PRINT_DEC16 timercount
+
+        ;; Now print how many more bigloopcounter is vs. timercount
+        ;; (ie. prove I can figure out how to subtract)
+
         lda #" "
         jsr print_character
-        PRINT_DEC16 bigloopcounter
+        ;; subtract timercount from bigloopcounter
+        sei
+        lda timercount
+        sta value
+        lda timercount + 1
+        sta value + 1
+        cli
+        sec
+        lda bigloopcounter
+        sbc value
+        sta value
+        lda bigloopcounter + 1
+        sbc value + 1
+        sta value + 1
+
+        ;; is the result non-negative?
+        bcs goprint_delta
+
+        ;; Not likely to kick in unfortunately
+        lda #"-"
+        jsr print_character
+
+        ;; negate
+        sec
+        lda #0
+        sbc value
+        sta value
+        lda #0
+        sbc value + 1
+        sta value + 1
+goprint_delta:
+        jsr print_value_in_decimal
+
+        lda #" "
+        jsr print_character
+        lda #" "
+        jsr print_character
 
         inc bigloopcounter
         bne _blnl
@@ -300,9 +340,21 @@ _blnl:
         ;; test bit one on port A, if high, skip the wait
         lda #%00000010
         bit PORTA
-        bne nowait
+        beq dowait
+
+        ;; delay to force the negative case
+        ldx #$8f
+        ldy #$ff
+postspin:
+        dey
+        bne postspin
+        dex
+        bne postspin
+
+dowait:
         wai
-nowait:
+
+
         jmp loop
 
 nothing_more_to_do:
