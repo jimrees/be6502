@@ -1,9 +1,12 @@
 
 %.bin: %.s
-	vasm -c02 -dotdir -Fbin -o $@ $<
+	vasm -wdc02 -dotdir -Fbin -o $@ $<
 
 %.burn: %.bin
 	minipro -u -p AT28C256 -w $<
+
+%.verify: %.bin
+	minipro -u -p AT28C256 --verify $<
 
 # Don't delete bin files just because the burn failed.
 .PRECIOUS: %.bin
