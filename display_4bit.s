@@ -3,6 +3,11 @@ PORTB = $6000
 PORTA = $6001
 DDRB = $6002
 DDRA = $6003
+T1CL = $6004
+T1CH = $6005
+T1LL = $6006
+T1LH = $6007
+ACR = $600B
 PCR = $600C       ; [ CB2{3} | CB1{1} | CA2{3} | CA1{1} | PCR ]
 IFR = $600D       ; [ IRQ TIMER1 TIMER2 CB1 CB2 SHIFTREG CA1 CA2 ]
 IER = $600E       ; [ Set/Clr TIMER1 TIMER2 CB1 CB2 SR CA1 CA2 ]
@@ -10,11 +15,24 @@ IER = $600E       ; [ Set/Clr TIMER1 TIMER2 CB1 CB2 SR CA1 CA2 ]
 value = $0200
 mod10 = $0202
 counter = $0204
+timercount = $0206
+bigloopcounter = $0208
+clicksuntilca1_reenable = $00   ; allocate from zeropage
 
 ;;; Display control bits - where they live on PORTB
 E  = %01000000
 RW = %00100000
 RS = %00010000
+
+        .macro PRINT_DEC16,address
+        sei
+        lda \address
+        ldy \address + 1
+        cli
+        sta \value
+        sty \value + 1
+        jsr print_value_in_decimal
+        .endm
 
 ;;; The rom is mapped to start at $8000
         .org $8000
@@ -119,16 +137,79 @@ update_led_on_x_change:
         plp                     ; restore condition bits
         rts
 
+;;; value must contain the number
+;;; A,X,Y will all be trashed.
+print_value_in_decimal:
+        lda #0                  ; push a null char on the stack
+        pha
+
+divide_do:
+        ;; Initialize remainder to zero
+        lda #0
+        sta mod10
+        sta mod10 + 1
+        clc
+
+        ldx #16
+divloop:
+        ;; Rotate quotient & remainder
+        rol value
+        rol value + 1
+        rol mod10
+        rol mod10 + 1
+
+        ;;  a,y = dividend - divisor
+        sec
+        lda mod10
+        sbc #10
+        tay                     ; stash low byte in y
+        lda mod10 + 1
+        sbc #0
+        bcc ignore_result       ; dividend < divisor
+        sty mod10
+        sta mod10 + 1
+ignore_result:
+        dex
+        bne divloop
+
+        rol value               ; final rotate
+        rol value+1
+
+        lda mod10
+
+        clc
+        adc #"0"
+        pha
+
+        ;; are we done?
+        lda value
+        ora value+1
+        bne divide_do
+
+        pla                     ; we know there's at least one
+unfold_print_loop:
+        jsr print_character
+        pla                     ; pop the next one
+        bne unfold_print_loop   ; if not-null, keep looping
+
+        rts
+
 reset:
         lda #0
         sta counter
         sta counter + 1
+        sta timercount
+        sta timercount + 1
+        sta bigloopcounter
+        sta bigloopcounter + 1
+        sta clicksuntilca1_reenable
+        sta clicksuntilca1_reenable + 1
 
         ;; Set the data direction bits for the ports
         lda #%11111111
         sta DDRB
 
-        lda #%00000001          ; only an LED on PORTA-0 currently
+        lda #%00000101          ; a few leds
         sta DDRA
 
         ;; Do a delay spin to let the reset button de-bounce
@@ -172,8 +253,19 @@ spin:
         lda #%00000000
         sta PCR                 ; negative active edge for CA1
 
-        lda #%10000010          ; enable CA1 interrupts
+        lda #$ff                ; populate timer1 counter & latches to 65535
+        sta T1CL                ; At 1Mhz, this means ~16/second
+        sta T1CH
+        sta T1LL
+        sta T1LH
+
+        lda #%11000000          ; set timer1 for continuous interrupts + PB7
+        sta ACR
+
+        bit PORTA               ; pre-clear any CA1 conditions
+        lda #%11000010          ; enable CA1 & Timer1 interrupts
         sta IER
+
         cli
 loop:
         lda #%00000010          ; home
@@ -192,100 +284,76 @@ mloopstart:
         jmp mloopstart
 mloopend:
 
-        ;; Print number in decimal
-        ;; Initialize value to the number to be converted
-        ;; Grab counter *atomically* with interrupts disabled
-        ;; so we only get a consistent value
-        sei                     ; disable interrupts
-        lda counter
-        ldy counter + 1
-        cli                     ; re-enable interrupts
-        sta value
-        sty value + 1
-        lda #0                  ; push a null char on the stack
-        pha
-
-divide:
-        ;; Initialize remainder to zero
-        lda #0
-        sta mod10
-        sta mod10 + 1
-        clc
-
-        ldx #16
-divloop:
-        ;; Rotate quotient & remainder
-        rol value
-        rol value + 1
-        rol mod10
-        rol mod10 + 1
-
-        ;;  a,y = dividend - divisor
-        sec
-        lda mod10
-        sbc #10
-        tay                     ; stash low byte in y
-        lda mod10 + 1
-        sbc #0
-        bcc ignore_result       ; dividend < divisor
-        sty mod10
-        sta mod10 + 1
-ignore_result:
-        dex
-        bne divloop
-
-        rol value               ; final rotate
-        rol value+1
-
-        lda mod10
-
-        clc
-        adc #"0"
-        pha
-
-        ;; are we done?
-        lda value
-        ora value+1
-        bne divide
-
-        pla                     ; we know there's at least one
-unfold_print_loop:
+        PRINT_DEC16 counter
+        lda #" "
         jsr print_character
-        pla                     ; pop the next one
-        bne unfold_print_loop   ; if not-null, keep looping
+        PRINT_DEC16 timercount
+        lda #" "
+        jsr print_character
+        PRINT_DEC16 bigloopcounter
 
+        inc bigloopcounter
+        bne _blnl
+        inc bigloopcounter + 1
+_blnl:
+
+        ;; test bit one on port A, if high, skip the wait
+        lda #%00000010
+        bit PORTA
+        bne nowait
+        wai
+nowait:
         jmp loop
 
 nothing_more_to_do:
         jmp nothing_more_to_do
 
 nmi:
-        inc counter
-        bne exit_nmi
-        inc counter + 1
-exit_nmi:
         rti
 
 irq:
-        phx
-        phy
+        pha
 
-        inc counter
-        bne exit_irq
+        ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        ;; Check if the ca1 bit is set in BOTH the conditions and enables
+        lda #%00000010
+        and IFR                 ; condition
+        and IER                 ; enabled
+        beq ca1_done            ; skip this section if not
+
+        inc counter             ; increment counter
+        bne counter_nr
         inc counter + 1
-exit_irq:
+counter_nr:
 
-        ldy #$6f
-        ldx #$ff
-debounce_delay:
-        dex
-        bne debounce_delay
-        dey
-        bne debounce_delay
+        lda #%00000010          ; debounce method - disable this interrupt
+        sta IER
+        lda #3
+        sta clicksuntilca1_reenable
 
-        bit PORTA               ; clears the interrupt?
-        ply
-        plx
+ca1_done:
+
+        ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        lda #%01000000          ; check if timer1 is active
+        bit IFR                 ; and with current conditions
+        beq t1_done             ; skip if not
+        bit T1CL                ; clear condition
+
+        lda clicksuntilca1_reenable ; are we pending a re-enable?
+        beq skip_reenable           ; skip if not
+        dec clicksuntilca1_reenable ; now re-enable?
+        bne skip_reenable           ; skip if not
+        lda #%10000010              ; re-enable
+        bit PORTA                   ; clear the condition if it exists
+        sta IER                     ; and enable
+skip_reenable:
+
+        inc timercount          ; Increment timer counter
+        bne t1_done
+        inc timercount + 1
+t1_done:
+
+        pla                     ; restore & return
         rti
 
         ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
