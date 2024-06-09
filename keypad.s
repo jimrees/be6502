@@ -160,9 +160,8 @@ print_value_in_decimal:
 
 divide_do:
         ;; Initialize remainder to zero
-        lda #0
-        sta mod10
-        sta mod10 + 1
+        stz mod10
+        stz mod10 + 1
         clc
 
         ldx #16
@@ -245,23 +244,21 @@ spin:
 
         lda #%00000001          ; clear screen
         jsr lcd_instruction
-        lda #0
-        sta charsprinted
+        stz charsprinted
 
         rts
 
 reset:
-        lda #0
-        sta counter
-        sta counter + 1
-        sta timercount
-        sta timercount + 1
-        sta bigloopcounter
-        sta bigloopcounter + 1
-        sta clicksuntilca1_reenable
-        sta clicksuntilca1_reenable + 1
-        sta numericpadstate
-        sta charsprinted
+        stz counter
+        stz counter + 1
+        stz timercount
+        stz timercount + 1
+        stz bigloopcounter
+        stz bigloopcounter + 1
+        stz clicksuntilca1_reenable
+        stz clicksuntilca1_reenable + 1
+        stz numericpadstate
+        stz charsprinted
 
         ;; Set the data direction bits for the ports
         lda #%11111111
@@ -285,12 +282,14 @@ reset:
         lda #%11000000          ; set timer1 for continuous interrupts + PB7
         sta ACR
 
-        bit PORTA               ; pre-clear any CA1 conditions
         lda #%11000000          ; enable Timer1 interrupts
         sta IER
 
         cli
         ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+        lda #%11110000          ; assert columns, not rows
+        sta DDRA
 
 loop:
         ;; Pins 0..3 rows
@@ -298,23 +297,27 @@ loop:
         ;; The idea is that if we assert low on ONE column bit
         ;; then wherever a row's bit is reading low, that intersection
         ;; is a pressed button.
+        ;; It turns out we can set DDRA once, with all columns asserted
+        ;; and all rows passive.
+        ;; All bits are pulled high by resistors, though now I realize
+        ;; I can yank the ones for the columns because I'm always driving
+        ;; them.
 
         ;; pre-push a null char
         ldx #0
         phx
-
-        lda #%00010000          ; column 0 setup
+        ;; Set up the initial column mask, with ONE bit low
+        lda #%11101111          ; column 0 setup, a single 0 bit
         sta columnmask
+
 column_loop:
         lda columnmask
-        sta DDRA
-        lda #0                  ; write 0
         sta PORTA               ; assert just the one bit low
 
         ldy #4                  ; set up loop counter
         lda PORTA               ; read the state
         sta bitvar              ; save in bitvar (we are out of registers)
-rowloop:
+row_loop:
         ror bitvar              ; Move the next bit into carry
         bcs not_pressed         ; if carry set, then this key is not pressed
         lda rc_chars,x          ; else fetch the char and push
@@ -322,14 +325,10 @@ rowloop:
 not_pressed:
         inx                     ; increment the index
         dey                     ; decrement the 4-bit counter
-        bne rowloop             ; ..and loop
+        bne row_loop            ; ..and loop
 
-        clc                     ; clear the carry so that...
-        rol columnmask          ; this does not introduce a 1 on the right
-        bcc column_loop         ; As long as the 1 bit didn't just shift off
-
-        lda #0                  ; restore all passive on porta
-        sta DDRA
+        rol columnmask          ; shift the mask left
+        bcs column_loop         ; when the zero hits carry, we're done
 
         ;; Now process what we scanned, depending on the current
         ;; state.
