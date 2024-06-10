@@ -3,18 +3,18 @@
 ;;; Pre-allocate storage for decimal formatter
 value = $0200
 mod10 = $0202
-sensorbytes = $020a             ; SIX bytes, the last byte says we're done
-
-integral_rh      = $020a
-decimal_rh       = $020b
-integral_temp    = $020c
-decimal_temp     = $020d
-sensor_checksum  = $020e
-sensor_populated = $020f        ; when this becomes non-zero, we're done
 
 tick_counter = $00              ; and 3 more bytes too
 charsprinted = $04
 ca2_counter = $05
+
+sensorbytes      = $06          ; SIX bytes, the last byte says we're done
+integral_rh      = $06
+decimal_rh       = $07
+integral_temp    = $08
+decimal_temp     = $09
+sensor_checksum  = $0a
+last_down_edge_lsb = $0b
 
 DHT11_PIN = 7
 DHT11_MASK = (1<<DHT11_PIN)
@@ -30,97 +30,63 @@ RS = %00010000
 ;;; String to display on LCD.  Note padding to 40 characters - this
 ;;; is how to wrap around to the second row.
 message:        asciiz "Temperature & RH                        "
+spinchars:      .byte "|/-\"
 
         .include "lcd.s"
         .include "macros.s"
         .include "decimalprint.s"
 
-        ;; the count of ticks is in A
-        ;; this waits until the tick_counter == the target value
-delayticks:
-        clc
-        adc tick_counter
-delay_spin$:
-        cmp tick_counter
-        bne delay_spin$
-        rts
-
-        .macro DHT11_SPIN_WHILE_HIGH
-        SPIN_WHILE_BIT_SET PORTA, DHT11_PIN
-        .endm
-
-        .macro DHT11_SPIN_WHILE_LOW
-        SPIN_WHILE_BIT_CLEAR PORTA, DHT11_PIN
+        .macro DHT11_SPIN_UNTIL_DOWNEDGE
+        lda #%00000001
+        ifrspin\@$ :
+        bit IFR
+        beq ifrspin\@$
+        sta IFR
         .endm
 
         ;; writes to sensorbytes
 dht11_readRawData:
+        ;; Preload with 1 each byte
+        lda #1
+        sta sensorbytes
+        sta sensorbytes+1
+        sta sensorbytes+2
+        sta sensorbytes+3
+        sta sensorbytes+4
 
         ;; Initiation
         lda #DHT11_MASK         ; pin.mode = OUTPUT
         sta DDRA
-        stz PORTA               ; assert LOW
-        ;; Do stuff for > 18ms before releasing the pin
-
-        ;; 18000 us - 2 ticks away, but we really want 3 ticks
-        ;; but bcs means we keep at it until we exceed.
+        stz PORTA               ; assert LOW (1 downedge)
+        ;; Delay >= 18ms before releasing the pin
         lda #3
         jsr delayticks
 
+        ;; block interrupts so timing isn't screwed up
+        lda #%00000001
+        sta IFR                 ; clear the downedge condition
         stz DDRA                ; release and let the pull up happen
+        DHT11_SPIN_UNTIL_DOWNEDGE ; when DHT takes over
+        DHT11_SPIN_UNTIL_DOWNEDGE ; when DHT's first bit is initiated
+        ldy T1CL                ; sample the clock, and stash it
+        sty last_down_edge_lsb
 
-        DHT11_SPIN_WHILE_LOW    ; should be instantaneous
-        DHT11_SPIN_WHILE_HIGH
-
-        ;; then these are the 80 & 80 us initial response
-        DHT11_SPIN_WHILE_LOW
-        DHT11_SPIN_WHILE_HIGH
-
-        ;; so now the first bit is started (low)
-
-        jsr dht11_readByte
-        sta sensorbytes
-        jsr dht11_readByte
-        sta sensorbytes+1
-        jsr dht11_readByte
-        sta sensorbytes+2
-        jsr dht11_readByte
-        sta sensorbytes+3
-        jsr dht11_readByte
-        sta sensorbytes+4
-        rts
-
-        ;;
-        ;; no arguments, returns byte in A register
-        ;;
-dht11_readByte:
-        ;; preload a 1 into the result byte.  We will know we are done
-        ;; when this bit has rolled up into the Carry.
-        ldy #1                  ; initial bit
-
-        sei
+        ldx #-5
+byteloop$:
 bitloop$:
-        DHT11_SPIN_WHILE_LOW    ; wait for hi
-
-        NOPS 10                 ; delay 30us
-
-        lda PORTA               ; put pin bit into C
-        .if DHT11_PIN > 3
-        DOTIMES asl,(8-DHT11_PIN)
-        .else
-        DOTIMES lsr,(DHT11_PIN+1)
-        .endif
-
-        tya
-        rol                     ; rotate the new bit in, and the high bit to C
-        tay
-
-        DHT11_SPIN_WHILE_HIGH   ; wait for the start of the next bit
-
-        bcc bitloop$            ; the top bit was not one yet
-        tya
-        cli
+        DHT11_SPIN_UNTIL_DOWNEDGE
+        tya                     ; put prior time in A reg
+        ldy T1CL                ; sample the new time
+        sty last_down_edge_lsb  ; save it
+        sec
+        sbc last_down_edge_lsb
+        cmp #99
+        rol sensorbytes+5,x
+        bcc bitloop$
+        inx
+        bmi byteloop$
         rts
+
 
 timer_initialization:
         ;; Set up repeat mode on a 10,000 frequency
@@ -140,6 +106,16 @@ timer_initialization:
         cli                     ; stop masking interrupts
         rts
 
+        ;; this waits until the tick_counter == the target value
+        ;; The count of ticks to wait is in A
+delayticks:
+        clc
+        adc tick_counter
+delay_spin$:
+        cmp tick_counter
+        bne delay_spin$
+        rts
+
 ;;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 reset:
@@ -150,25 +126,23 @@ reset:
         stz ca2_counter
         lda #%00000010
         sta PCR
-        lda #%10000001          ; enable CA2 interrupts
-        sta IER
 
         ;; Extra pre-loop delay
         lda #"<"
         jsr print_character
 
-        lda #100
+        lda #110
         jsr delayticks
 
         lda #">"
         jsr print_character
 
 loop$:
-        ;; 1 second delay
-        lda #190
+        ;; The chip needs time between pollings
+        lda #180
         jsr delayticks
 
-        jsr lcd_clear
+        jsr lcd_home
         PRINT_C_STRING message
 
         jsr dht11_readRawData
@@ -207,8 +181,14 @@ loop$:
 ck_ok$:
         lda #"C"
         jsr print_character
-        PRINT_DEC8 ca2_counter
-        stz ca2_counter
+
+        lda ca2_counter
+        inc
+        sta ca2_counter
+        and #3
+        tax
+        lda spinchars,x
+        jsr print_character
 
 fin$:
         jmp loop$
@@ -218,23 +198,6 @@ nmi:
         rti
 
 irq:
-        ;; TWO conditions - T1, and CA2
-        pha
-
-        ;; CA2 is high priority
-        lda IFR
-        lsr
-        bcc skip_ca2$
-        inc ca2_counter
-        lda #%01111111
-        sta IFR                 ; clear ALL conditions and get out
-        pla
-        rti
-
-skip_ca2$:
-        bit IFR
-        bvc skip_timer$
-
         bit T1CL                ; clear condition
         inc tick_counter        ; increment lsbyte
         bne tick_inc_done$      ; roll up as needed
@@ -244,25 +207,7 @@ skip_ca2$:
         bne tick_inc_done$
         inc tick_counter+3
 tick_inc_done$:
-skip_timer$:
-        pla
         rti
-
-        ;; inc irqcounter
-        ;; bit PORTA               ; clear the CA1 condition
-        ;; Sample the time since the last interrupt
-        ;; ldy #255
-        ;; lda #156
-        ;; sec
-        ;; sbc T1CL
-        ;; sty T1CL                ; Close together as possible
-        ;;
-        ;; The bit in in C, roll everything through - elegant, if expensive
-        ;; rol sensorbytes+4
-        ;; rol sensorbytes+3
-        ;; rol sensorbytes+2
-        ;; rol sensorbytes+1
-        ;; rol sensorbytes
 
         ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
         ;; The interrupt & reset vectors
