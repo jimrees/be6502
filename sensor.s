@@ -176,6 +176,59 @@ delay_wait$:
         bne delay_wait$
         rts
 
+        .macro MULTIPLY_BY,N,DST
+        .if \N==1
+        .else
+        .if (\N %2)==0
+        asl \DST
+        rol \DST+1
+        MULTIPLY_BY \N/2,\DST
+        .else
+        lda \DST+1
+        pha
+        lda \DST
+        pha
+        MULTIPLY_BY (\N -1),\DST
+        pla
+        clc
+        adc \DST
+        sta \DST
+        pla
+        adc \DST+1
+        sta \DST+1
+        .endif
+        .endif
+        .endm
+
+        ;; A is # seconds, up to 255.
+        ;; This multiplies by 100, storing the result in the two-byte value buffer
+        ;; Then it adds the (atomically-sampled) low two bytes of tick_counter.
+        ;; This becomes the target time to wait for.
+delayseconds:
+        sta value
+        stz value+1
+        MULTIPLY_BY 100,value
+        lda value
+        clc
+        sei
+        adc tick_counter
+        sta value
+        lda value+1
+        adc tick_counter+1
+        cli
+        sta value+1
+        ;; now [ value+1 value ] are the target time to wait for
+ds_wait$:
+        wai
+        ;; check for value+1 == tick_counter+1, then the low bits
+        lda tick_counter+1
+        cmp value+1
+        bne ds_wait$
+        lda tick_counter
+        cmp value
+        bne ds_wait$
+        rts
+
 ;;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 reset:
@@ -195,20 +248,20 @@ reset:
         lda #"."
         jsr print_character
 
-        lda #55
-        jsr delayticks
+        lda #1
+        jsr delayseconds
 
         lda #"."
         jsr print_character
 
-        lda #55
-        jsr delayticks
+        lda #1
+        jsr delayseconds
 
         lda #"."
         jsr print_character
 loop$:
-        lda #180
-        jsr delayticks
+        lda #5
+        jsr delayseconds
 
         jsr lcd_home
         PRINT_C_STRING message
