@@ -1,3 +1,7 @@
+;;; Display control bits - where they live on PORTB
+E  = %01000000
+RW = %00100000
+RS = %00010000
 
 ;;; This depends on via.h having been included
 
@@ -88,6 +92,12 @@ lcd_home:
         jsr lcd_instruction
         rts
 
+        ;; used to set position #$40 is useful for going to start of second line
+lcd_set_position:
+        ora #%10000000
+        jsr lcd_instruction
+        rts
+
 ;;; Helper routine for de-bounce spin to tell the user that
 ;;; activity is happening.  The low bit of PORTA is connected
 ;;; to an LED.  This essentially takes bit #5 of X and puts
@@ -113,7 +123,7 @@ lcd_initialization:
 
         ;; Do a delay to let the reset button de-bounce
         ;; 0.2 seconds = 200ms = 20 ticks
-        lda #20
+        lda #((200 * TIMER_FREQUENCY) / 1000)
         jsr delayticks
 
         ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -143,9 +153,6 @@ lcd_initialization:
 
         rts
 
-
-
-
         ;; This steps on X and A registers
         .macro PRINT_C_STRING,location
         ldx #0
@@ -157,3 +164,59 @@ lcd_initialization:
         jmp \start\@$
         \end\@$ :
         .endm
+
+
+print_hex_nibble:
+        clc
+        cmp #10
+        bcs alpha$
+        adc #"0"
+        jsr print_character
+        rts
+alpha$:
+        adc #("A" - 10 - 1)
+        jsr print_character
+        rts
+
+;;; A is loaded with a byte, print it
+print_hex8:
+        pha
+        lsr
+        lsr
+        lsr
+        lsr
+        jsr print_hex_nibble
+        pla
+        and #%00001111
+        jsr print_hex_nibble
+        rts
+
+
+print_binary8:
+        phx
+        phy
+        ldx #8
+pbloop$:
+        asl                     ; set the C flag
+        tay
+        lda #"0"
+        adc #0                  ; adds 1 if C is set
+        jsr print_character
+        tya
+        dex
+        bne pbloop$
+        ply
+        plx
+        rts
+
+print_n_spaces:
+        phx
+        tax
+loop$:
+        lda #" "
+        jsr print_character
+        dex
+        bne loop$
+
+        plx
+        rts

@@ -67,7 +67,8 @@ dht11_readRawData:
         lda #DHT11_MASK         ; pin.mode = OUTPUT
         sta DDRA                ; so ONLY that pin is outout
         stz PORTA               ; assert LOW (1 downedge)
-        lda #3
+
+        lda #((20 * TIMER_FREQUENCY) / 1000) + 1
         jsr delayticks
 
         ;; Reset buffer index to 0.  This should be safe while we're
@@ -144,90 +145,6 @@ ck_bad_checksum$
         lda #1                 ; clears N & Z, signalling checksum error
         rts
 
-timer_initialization:
-        ;; Set up repeat mode on a 10,000 frequency
-        ;; 9998 = 270e
-        stz tick_counter
-        stz tick_counter+1
-        stz tick_counter+2
-        stz tick_counter+3
-        lda #%01000000          ; enable continuous mode for timer1
-        sta ACR
-        lda #$0e
-        sta T1CL
-        lda #$27
-        sta T1CH
-        lda #%11000000          ; turn on timer1 interrupts
-        sta IER
-        cli                     ; stop masking interrupts
-        rts
-
-        ;; this waits until the tick_counter == the target value
-        ;; The count of ticks to wait is in A
-        ;; Since interrupts are required to get us to the target,
-        ;; we might as well use wai in the loop and reduce power
-        ;; usage.
-delayticks:
-        clc
-        adc tick_counter
-delay_wait$:
-        wai
-        cmp tick_counter
-        bne delay_wait$
-        rts
-
-        .macro MULTIPLY_BY,N,DST
-        .if \N==1
-        .else
-        .if (\N %2)==0
-        asl \DST
-        rol \DST+1
-        MULTIPLY_BY \N/2,\DST
-        .else
-        lda \DST+1
-        pha
-        lda \DST
-        pha
-        MULTIPLY_BY (\N -1),\DST
-        pla
-        clc
-        adc \DST
-        sta \DST
-        pla
-        adc \DST+1
-        sta \DST+1
-        .endif
-        .endif
-        .endm
-
-        ;; A is # seconds, up to 255.
-        ;; This multiplies by 100, storing the result in the two-byte value buffer
-        ;; Then it adds the (atomically-sampled) low two bytes of tick_counter.
-        ;; This becomes the target time to wait for.
-delayseconds:
-        sta value
-        stz value+1
-        MULTIPLY_BY 100,value
-        lda value
-        clc
-        sei
-        adc tick_counter
-        sta value
-        lda value+1
-        adc tick_counter+1
-        cli
-        sta value+1
-        ;; now [ value+1 value ] are the target time to wait for
-ds_wait$:
-        wai
-        ;; check for value+1 == tick_counter+1, then the low bits
-        lda tick_counter+1
-        cmp value+1
-        bne ds_wait$
-        lda tick_counter
-        cmp value
-        bne ds_wait$
-        rts
 
 ;;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 

@@ -47,3 +47,28 @@
         .endif
         .endif
         .endm
+
+
+        .macro MULTIPLY_BY,N,DST
+        .if \N==1
+        .else
+        .if (\N %2)==0
+        asl \DST
+        rol \DST+1
+        MULTIPLY_BY \N/2,\DST
+        .else
+        lda \DST+1
+        pha
+        lda \DST
+        pha
+        MULTIPLY_BY (\N -1),\DST
+        pla
+        clc
+        adc \DST
+        sta \DST
+        pla
+        adc \DST+1
+        sta \DST+1
+        .endif
+        .endif
+        .endm

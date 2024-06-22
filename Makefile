@@ -1,6 +1,6 @@
 
-%.bin: %.s
-	vasm -L $*.list -wdc02 -dotdir -Fbin -o $@ $<
+%.bin: %.s decimalprint.s lcd.s macros.s pre_uart_serial.s via.s acia.s timer.s
+	vasm -L $*.list -esc -wdc02 -dotdir -Fbin -o $@ $<
 
 %.list: %.bin
 	@true
