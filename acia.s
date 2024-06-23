@@ -114,12 +114,10 @@ serial_tx_char:
         ;; Use TIMER2 in one-shot mode.  Check for completion
         ;; in IFR5
         pha
-        phy
-        lda #<DELAY_CLOCKS
-        ldy #>DELAY_CLOCKS
+        lda #<(DELAY_CLOCKS-3)
         sta T2CL
-        sty T2CH
-        ply
+        lda #>(DELAY_CLOCKS-3)
+        sta T2CH                ; this clears IFR5 and initiates countdown
         lda #%00100000          ; IFR5
 delayspin$:
         bit IFR
