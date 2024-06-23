@@ -98,23 +98,6 @@ lcd_set_position:
         jsr lcd_instruction
         rts
 
-;;; Helper routine for de-bounce spin to tell the user that
-;;; activity is happening.  The low bit of PORTA is connected
-;;; to an LED.  This essentially takes bit #5 of X and puts
-;;; it out to the LED, for a blinking indicator during the
-;;; spin.
-update_led_on_x_change:
-        php                     ; preserve condition bits
-        txa                     ; Grab X
-        lsr                     ; >>5
-        lsr
-        lsr
-        lsr
-        lsr
-        sta PORTA               ; set led per X.bit #5
-        plp                     ; restore condition bits
-        rts
-
 lcd_initialization:
         ;; LCD owns all of PORTB, but bit 7 is unused. Unclear how we
         ;; might "share" it for others.

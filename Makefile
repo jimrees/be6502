@@ -11,6 +11,10 @@
 %.verify: %.bin
 	minipro -u -p AT28C256 --verify $<
 
+%.woz: %.bin
+	hexdump -e '"1%03_ax: " 16/1 "%02X " "\n"' $< > $@
+
+
 # Don't delete bin files just because the burn failed.
 .PRECIOUS: %.bin
 
