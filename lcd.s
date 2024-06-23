@@ -137,15 +137,28 @@ lcd_initialization:
         rts
 
         ;; This steps on X and A registers
-        .macro PRINT_C_STRING,location
+        .macro PRINT_STRING,location,PRINTER,DELIMITER
         ldx #0
         \start\@$ :
         lda \location,x
+        .if \DELIMITER != 0
+        cmp #\DELIMITER
+        .endif
         beq \end\@$
-        jsr print_character
+        jsr \PRINTER
         inx
         jmp \start\@$
         \end\@$ :
+        .endm
+
+        .macro PRINT_C_STRING,location,PRINTER
+        PRINT_STRING \location,\PRINTER,0
+        .endm
+        .macro LCD_PRINT_STRING,location,DELIMITER
+        PRINT_STRING \location,print_character,\DELIMITER
+        .endm
+        .macro LCD_PRINT_C_STRING,location
+        PRINT_STRING \location,print_character,0
         .endm
 
 
