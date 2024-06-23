@@ -13,6 +13,10 @@ tick_counter   = $33            ; & 4,5,6
 value          = $37
 IN             = $0200          ; Input buffer
 
+        .macro SERIAL_PRINT_C_STRING,location
+        PRINT_STRING \location,echo,0
+        .endm
+
         .org $f000
         .include "via.s"
         .include "macros.s"
@@ -20,38 +24,20 @@ IN             = $0200          ; Input buffer
         .include "lcd.s"
         .include "acia.s"
 
-message:        .asciiz "\rHello! Welcome to WozMon.\r"
-
-disp_input_to_lcd:
-        jsr lcd_clear
-        ldy #$ff
-disploop$:
-        iny
-        lda IN,Y
-        cmp #$0D
-        beq done_display$
-        jsr print_character
-        jmp disploop$
-done_display$:
-        lda #$40
-        jsr lcd_set_position
-        rts
+message:        .asciiz "    -WozMon-    "
 
 reset:
         jsr timer_initialization
         jsr lcd_initialization
         jsr serial_initialization
 restart:
-        ldx #0
-mloop$:
-        lda message,x
-        beq endmloop$
+        jsr lcd_clear
+        LCD_PRINT_C_STRING message
+        SERIAL_PRINT_C_STRING message
+        lda #13
         jsr echo
-        inx
-        bpl mloop$
-endmloop$:
-        lda #$1b                ; starting state, escape
 
+        lda #$1b                ; starting state, escape
 notcr:
         CMP     #$08           ; Backspace key?
         BEQ     backspace      ; Yes.
@@ -85,10 +71,8 @@ nextchar:
         CMP     #$0D           ; CR?
         BNE     notcr          ; No.
 
-        ;; we have stored content between IN,0 and IN,Y inclusive
-        ;; though we know IN,Y is CR, so really it's IN,0 ... IN,(Y-1)
-        ;; and it must be the first CR?
-        jsr disp_input_to_lcd
+        jsr lcd_clear
+        LCD_PRINT_STRING IN,$0d
 
         LDY     #$FF           ; Reset text index.
         LDA     #$00           ; For XAM mode.
@@ -124,22 +108,19 @@ nexthex:
         EOR     #$30           ; Map digits to $0-9.
         CMP     #$0A           ; Digit?
         BCC     dig            ; Yes.
+        ORA     #$20           ; if lower case, map to upper case
         ADC     #$88           ; Map letter "A"-"F" to $FA-FF.
         CMP     #$FA           ; Hex letter?
         BCC     nothex         ; No, character not hex.
 dig:
-        ASL
-        ASL                    ; Hex digit to MSD of A.
-        ASL
-        ASL
-
         LDX     #$04           ; Shift count.
 hexshift:
-        ASL                    ; Hex digit left, MSB to carry.
-        ROL     L              ; Rotate into LSD.
+        ASL     L              ; Shift high L bit into H
         ROL     H              ; Rotate into MSD's.
         DEX                    ; Done 4 shifts?
         BNE     hexshift       ; No, loop.
+        AND     #$0F           ; Mask A (for the $FA-$FF case)
+        TSB     L              ; OR into L
         INY                    ; Advance text index.
         BNE     nexthex        ; Always taken. Check next character for hex.
 
@@ -197,12 +178,12 @@ XAMNEXT:
         BCS     tonextitem     ; Not less, so no more data to output.
 
         INC     XAML
-        BNE     MOD8CHK        ; Increment 'examine index'.
+        BNE     MOD16CHK       ; Increment 'examine index'.
         INC     XAMH
 
-MOD8CHK:
+MOD16CHK:
         LDA     XAML           ; Check low-order 'examine index' byte
-        AND     #$07           ; For MOD 8 = 0
+        AND     #$0F           ; For MOD 16 = 0
         BPL     NXTPRNT        ; Always taken.
 
 PRBYTE:
