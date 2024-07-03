@@ -2,23 +2,12 @@
 .debuginfo -
 .feature string_escapes on
 
-        CHROUT = $F000
-        CHRIN = $F010
-        ANYCNTC = $F020
-        lcd_clear = $F030
-        lcd_home = $F040
-        lcd_set_position = $F050
-        lcd_print_hex8 = $F060
-        lcd_print_binary8 = $F070
-        lcd_print_character = $F080
-        SERIAL_CRLF = $F0A0
-        STROUT = $F0B0
-        lcd_print_string = $F0C0
+.include "syscall_defs.s"
 
-        wozstart = $FF00
-
+.zeropage
         counter = $00
 
+.code
         ;; This steps on X and A registers
         .macro PRINT_STRING location, PRINTER, DELIMITER
         .local start
@@ -89,7 +78,7 @@ loop2:
         jmp loop2
 
 gowozstart:
-        jmp wozstart
+        jmp WOZSTART
 
 lcdmessage:     .asciiz "PRINTCHARS"
 serialmessage:     .asciiz "\r\n>> PRINTCHARS <<"

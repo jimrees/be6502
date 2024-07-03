@@ -1,12 +1,6 @@
 .setcpu "65C02"
-
 .export repeat
-
-        CHROUT = $F000
-        ANYCNTC = $F020
-        SERIAL_CRLF = $F0A0
-        WOZSTART = $FF00
-
+.include "syscall_defs.s"
 .bss
 .align $100
 Array:       .res $800
