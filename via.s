@@ -1,3 +1,5 @@
+.ifndef VIA_S
+        VIA_S := 1
 ;;; Versatile Interface Adapter mapped addresses
 PORTB = $6000
 PORTA = $6001
@@ -14,3 +16,4 @@ ACR = $600B           ; [ T1{2} | T2{1} | SR{3} | PB | PA ]
 PCR = $600C           ; [ CB2{3} | CB1{1} | CA2{3} | CA1{1} | PCR ]
 IFR = $600D           ; [ IRQ TIMER1 TIMER2 CB1 CB2 SHIFTREG CA1 CA2 ]
 IER = $600E           ; [ Set/Clr TIMER1 TIMER2 CB1 CB2 SR CA1 CA2 ]
+.endif

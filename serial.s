@@ -1,6 +1,5 @@
         .include "via.s"
 
-charsprinted = $10
 loop_counter = $11
 tick_counter = $12              ; and 13,14,15
 

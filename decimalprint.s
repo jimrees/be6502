@@ -1,28 +1,22 @@
-        .macro PRINT_DEC16,address
-        sei
-        lda \address
-        ldy \address + 1
-        cli
-        sta value
-        sty value + 1
-        jsr print_value_in_decimal
-        .endm
+.setcpu "65C02"
+.debuginfo +
+.feature string_escapes on
 
-        .macro PRINT_DEC8,address
-        lda \address
-        sta value
-        stz value + 1
-        jsr print_value_in_decimal
-        .endm
+.import lcd_print_character
+.export value, mod10, divide_by_10, print_value_in_decimal
 
+.zeropage
+value:  .res 2
+mod10:  .res 2
 
-;;; value must contain the number
-;;; A,X,Y will all be trashed.
-print_value_in_decimal:
-        lda #0                  ; push a null char on the stack
+.code
+;;; Dividend in value, value+1
+;;; Result quotient in value,value+1 + mod10,mod10+1
+;;; Modifies flags, value, mod10
+divide_by_10:
         pha
-
-divide_do$:
+        phx
+        phy
         ;; Initialize remainder to zero
         lda #0
         sta mod10
@@ -30,7 +24,7 @@ divide_do$:
         clc
 
         ldx #16
-divloop$:
+@divloop:
         ;; Rotate quotient & remainder
         rol value
         rol value + 1
@@ -44,31 +38,42 @@ divloop$:
         tay                     ; stash low byte in y
         lda mod10 + 1
         sbc #0
-        bcc ignore_result$       ; dividend < divisor
+        bcc @ignore_result       ; dividend < divisor
         sty mod10
         sta mod10 + 1
-ignore_result$:
+@ignore_result:
         dex
-        bne divloop$
+        bne @divloop
 
         rol value               ; final rotate
         rol value+1
+        ply
+        plx
+        pla
+        rts
 
-        lda mod10
 
-        clc
-        adc #"0"
+;;; value must contain the number
+;;; A,X,Y will all be trashed.
+print_value_in_decimal:
+        ;; push digits onto the stack, then unwind to print
+        ;; the in the right order.
+        lda #0                  ; push a null char on the stack
         pha
-
-        ;; are we done?
+@next_digit:
+        jsr divide_by_10
+        lda mod10
+        clc
+        adc #'0'
+        pha
+        ;; If any part of the quotient is > 0, go again.
         lda value
         ora value+1
-        bne divide_do$
-
-        pla                     ; we know there's at least one
-unfold_print_loop$:
-        jsr print_character
+        bne @next_digit
+        pla
+@unfold_print_loop:
+        jsr lcd_print_character
         pla                     ; pop the next one
-        bne unfold_print_loop$  ; if not-null, keep looping
+        bne @unfold_print_loop  ; if not-null, keep looping
 
         rts

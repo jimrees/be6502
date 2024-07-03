@@ -2,3 +2,7 @@
 *.bin
 *.list
 *.woz
+*.o
+*.map
+*.prog
+bin2ld

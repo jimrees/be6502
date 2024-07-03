@@ -1,8 +1,14 @@
+.setcpu "65C02"
+.debuginfo +
+.feature string_escapes on
+.include "timer_defs.s"
+.include "macros.s"
+.include "via.s"
 
-CLOCKS_PER_SECOND = 1000000
-TIMER_FREQUENCY = 100           ; 100 ticks/second
-CLOCKS_PER_TICK = CLOCKS_PER_SECOND/TIMER_FREQUENCY
+.importzp value, tick_counter
+.export timer_initialization, delayseconds, delayticks
 
+.code
 timer_initialization:
         ;; Set up repeat mode on a 10,000 frequency
         ;; 9998 = 270e
@@ -10,7 +16,10 @@ timer_initialization:
         stz tick_counter+1
         stz tick_counter+2
         stz tick_counter+3
-        lda #%01000000          ; enable continuous mode for timer1
+
+        lda ACR
+        and #%00111111          ; isolate T1 stuff
+        ora #%01000000          ; continuous mode
         sta ACR
 
         lda #<(CLOCKS_PER_TICK-2)
@@ -19,7 +28,7 @@ timer_initialization:
         sta T1CH
         lda #%11000000          ; turn on timer1 interrupts
         sta IER
-        cli                     ; stop masking interrupts
+        lda T1CL                ; reset any current condition
         rts
 
         ;; this waits until the tick_counter == the target value
@@ -30,10 +39,10 @@ timer_initialization:
 delayticks:
         clc
         adc tick_counter
-delay_wait$:
+@delay_wait:
         wai
         cmp tick_counter
-        bne delay_wait$
+        bne @delay_wait
         rts
 
         ;; A is # seconds, up to 255.
@@ -54,14 +63,14 @@ delayseconds:
         cli
         sta value+1
         ;; now [ value+1 value ] are the target time to wait for
-ds_wait$:
+@ds_wait:
         wai
         ;; check for value+1 == tick_counter+1, then the low bits
         lda tick_counter+1
         cmp value+1
-        bne ds_wait$
+        bne @ds_wait
         lda tick_counter
         cmp value
-        bne ds_wait$
+        bne @ds_wait
         rts
 delayseconds_end:

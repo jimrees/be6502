@@ -1,47 +1,65 @@
-        .include "via.s"
+.setcpu "65C02"
+.debuginfo +
+.feature string_escapes on
+
+        CHROUT = $F000
+        CHRIN = $F010
+        ANYCNTC = $F020
+        lcd_clear = $F030
+        lcd_home = $F040
+        lcd_set_position = $F050
+        lcd_print_hex8 = $F060
+        lcd_print_binary8 = $F070
+        lcd_print_character = $F080
+        lcd_print_n_spaces = $F090
+        SERIAL_CRLF = $F0A0
+        STROUT = $F0B0
+        lcd_print_string = $F0C0
+        restore_default_irq_hook = $F0D0
+        install_irq_hook = $F0E0
+        set_forced_rtsb = $F0F0
+        WOZSTART = $FF00
+        tick_counter = $00
+
+.export lcd_print_character
+.exportzp tick_counter
+
+.include "via.s"
+.include "macros.s"
+.include "decimalprint_defs.s"
+.include "timer_defs.s"
+
+.import delayseconds, delayticks
 
 ;;; For simplicity, this is a full page.  More complex code could
 ;;; reduce it to 4 slots probably, if needed.  If reduced, it could
 ;;; be moved to the zeropage as well.
-ca2_buffer = $0200
+.bss
+.align 256
+ca2_buffer:      .res 256
 
-tick_counter = $00              ; and 3 more bytes too
-charsprinted = $04
-loop_counter = $05
+.zeropage
+sensorbytes:
+integral_rh:      .res 1
+decimal_rh:       .res 1
+integral_temp:    .res 1
+decimal_temp:     .res 1
+sensor_checksum:  .res 1
+timeout_target:   .res 1
+loop_counter:     .res 1
 
-sensorbytes      = $06          ; SIX bytes, the last byte says we're done
-integral_rh      = $06
-decimal_rh       = $07
-integral_temp    = $08
-decimal_temp     = $09
-sensor_checksum  = $0a
-value            = $0b
-mod10            = $0d
-ca2_producer     = $0f
+DHT_PIN = 7
+DHT_MASK = (1<<DHT_PIN)
 
-last_down_edge_lsb = $0b
+.code
+start:
+        jmp init
 
-DHT11_PIN = 7
-DHT11_MASK = (1<<DHT11_PIN)
 
-;;; Display control bits - where they live on PORTB
-E  = %01000000
-RW = %00100000
-RS = %00010000
-
-;;; The rom is mapped to start at $8000
-        .org $8000
-
-;;; String to display on LCD.  Note padding to 40 characters - this
-;;; is how to wrap around to the second row.
-message:        asciiz "Temperature & RH                        "
-timeout_message asciiz "TIMEOUT "
-spaces:         asciiz "                   "
+premessage:     .asciiz "Good Morning"
+message:        .asciiz "Temperature & RH"
+timeout_message: .asciiz "TIMEOUT "
 loopchars:      .byte "|/-",$a4
-
-        .include "lcd.s"
-        .include "macros.s"
-        .include "decimalprint.s"
 
 ;;;
 ;;; writes to sensorbytes
@@ -51,7 +69,7 @@ loopchars:      .byte "|/-",$a4
 ;;;    #+1 for checksum error
 ;;; The N & Z bits are set accordingly.
 ;;;
-dht11_readRawData:
+dht_readRawData:
         ;; Preload each byte with 1
         ;; As bits comes in, they are rol'ed in from the right.
         ;; When the carry bit gets set as a result of this roll,
@@ -64,64 +82,100 @@ dht11_readRawData:
         sta sensorbytes+4
 
         ;; Initiate the request with a long down pulse (>= 18ms)
-        lda #DHT11_MASK         ; pin.mode = OUTPUT
-        sta DDRA                ; so ONLY that pin is outout
-        stz PORTA               ; assert LOW (1 downedge)
+        lda #DHT_MASK         ; pin.mode = OUTPUT
+        tsb DDRA                ; so ONLY that pin is outout
+        trb PORTA               ; assert LOW (1 downedge)
 
         lda #((20 * TIMER_FREQUENCY) / 1000) + 1
         jsr delayticks
 
-        ;; Reset buffer index to 0.  This should be safe while we're
-        ;; holding the line down.
-        stz ca2_producer
-        stz DDRA                ; release and let the pull up happen
+        ;; first downedge in 40us.
+        ;; next after that in 160us
+        ;; then 80-120 x 40 after that 200 + 4800 = 5000us total max
+        ;; set a target time (4-byte?) after the release and sample as we go:
 
-        ;; wait for ca2_producer to become non-zero
-        ldy #2           ; # tries
-dhresponse_wait$:
-        wai
-        lda ca2_producer
-        bne dhresponse_edge_detected$
-        dey
-        bne dhresponse_wait$
-        lda #-1                 ; sets the N-bit, signals timeout
-        rts
+        lda #80
+        jsr set_forced_rtsb
 
-dhresponse_edge_detected$:
-        ldy #1                    ; index! set to 1
-        ;;
-        ;; The 80/80 cycle from DHT.  We could add time-out logic
-        ;; here too, but we already got the initial response.
-        ;; Anything that would lock up this loop is rare enough to
-        ;; merit the big RESET button.
-        ;;
-        .macro DHT11_WAIT_UNTIL_DOWNEDGE
-        ;; pre-condition Y is the current consumer buffer index
-        ifrwait\@$:
-        cpy ca2_producer
-        bne out\@$
-        wai
-        jmp ifrwait\@$
-        out\@$:
-        .endm
+        lda #$01
+        sta IFR                 ; clear the current CA2 condition
 
-        DHT11_WAIT_UNTIL_DOWNEDGE ; when DHT's first bit is initiated
-        lda ca2_buffer+1
+        ldy #(256-42)           ; down-edge counter
+
+        sei
+
+        ;; 5000us total should be the max.  Timeout at ~8192
+        sec
+        lda T1CH
+        sbc #(8192/256)         ; plenty of time
+        sta timeout_target
+
+        lda #DHT_MASK
+        trb DDRA                ; release and let the pull up happen
+
+@next_bit:
+
+.if 0
+;;; If we have to spin anyway, might as well just spin on the signal bit
+;;; and forget about downedge detection.
+;;; But be careful -- we have to be "on it" as each half of the pulse is
+;;; that much shorter -- the up-part of a 0-bit is only 26 cycles!
+@spin_until_up:
+        lda #DHT_MASK
+        bit PORTA
+        bne @spin_up_reached
+        lda T1CH
+        cmp timeout_target
+        bne @spin_until_up
+        jmp @timeout
+
+@spin_up_reached:
+@spin_until_down:
+        lda #DHT_MASK
+        bit PORTA
+        beq @downspin_reached
+        lda T1CH
+        cmp timeout_target
+        bne @spin_until_down
+        jmp @timeout
+@downspin_reached:
+.else
+
+@spin_until_ca2:
+        lda T1CH
+        cmp timeout_target
+        beq @timeout
+        lda #01
+        bit IFR
+        beq @spin_until_ca2
+        sta IFR                 ; clear the condition
+.endif
+
+        lda T1CL                ; sample the timer 4 (14) (this clear interrupt)
+        sta ca2_buffer-256+42,y ; push into buffer 4 (18)
+        iny                     ; decrement edge counter 2 (22)
+        bne @next_bit           ; keep looping 3 (25)
+
+        cli                     ; restore interrupts
+
+        lda #0
+        jsr set_forced_rtsb     ; re-enable RTSB
+
+        ldx #(256-5)            ; initialize outer loop counter
+        ldy #1
+        lda ca2_buffer,y        ; preload the 2nd stamp
         iny
-
-        ldx #-5                 ; initialize outer loop counter
-byteloop$:
-bitloop$:
-        DHT11_WAIT_UNTIL_DOWNEDGE
+@byteloop:
+@bitloop:
         sec
         sbc ca2_buffer,y
         cmp #99
         lda ca2_buffer,y        ; for next pass
         iny                     ; 'consume'
         rol sensorbytes+5,x     ; negative index works in zeropage
-        bcc bitloop$            ; see if that 1 has reached C yet
+        bcc @bitloop            ; see if that 1 has reached C yet
         inx
-        bmi byteloop$           ; while still negative, keep looping
+        bmi @byteloop           ; while still negative, keep looping
 
         ;; testing - if jumper is set high, it flips bit 0 of the checksum
         lda PORTA
@@ -138,140 +192,131 @@ bitloop$:
         clc
         adc sensorbytes+3
         cmp sensor_checksum
-        bne ck_bad_checksum$
+        bne @ck_bad_checksum
         lda #0
         rts
-ck_bad_checksum$
+@ck_bad_checksum:
         lda #1                 ; clears N & Z, signalling checksum error
         rts
 
+@timeout:
+        cli
+        lda #0
+        jsr set_forced_rtsb     ; re-enable RTSB
+        lda #$ff                ; return timeout, try again
+        rts
 
 ;;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-reset:
-        jsr timer_initialization
-        jsr lcd_initialization
+init:
+        ;; jsr timer_initialization - not needed.  bios already has done this
+        ;; jsr lcd_initialization - not needed
 
         ;; Also trigger CA2 downedges, in independent mode
         stz loop_counter
-        lda #%00000010
+
+        jsr SERIAL_CRLF
+
+        ;; Enable CA2 downedge
+        ;; Note that we're not turning on CA2 interrupts.
+        sei
+        lda PCR
+        and #%11110001          ; preserve everything that is not CA2
+        ora #%00000010          ; enable the CA2 downedge independent mode
         sta PCR
-        lda #%10000001
-        sta IER                 ; enable CA2 interrupts
-        lda #%00000001
-        sta IFR                 ; clear any current condition
+        cli
 
-        ;; Extra pre-loop delay
-        lda #"."
-        jsr print_character
+        jsr lcd_clear
+        lda #<premessage
+        ldy #>premessage
+        jsr lcd_print_string
 
-        lda #1
+@loop:
+        lda #2
         jsr delayseconds
 
-        lda #"."
-        jsr print_character
+        jsr lcd_clear
+        lda #<message
+        ldy #>message
+        jsr lcd_print_string
+        lda #40
+        jsr lcd_set_position
 
-        lda #1
-        jsr delayseconds
-
-        lda #"."
-        jsr print_character
-loop$:
-        lda #5
-        jsr delayseconds
-
-        jsr lcd_home
-        PRINT_C_STRING message
-
-        jsr dht11_readRawData
-        bmi timeout_error$
+        jsr dht_readRawData
+        bmi @timeout_error
         php                     ; save status
 
         ;; our data should be there:
-        PRINT_DEC8 integral_temp
-        lda #"."
-        jsr print_character
-        PRINT_DEC8 decimal_temp
-        lda #" "
-        jsr print_character
-        PRINT_DEC8 integral_rh
-        lda #" "
-        jsr print_character
-        ;; Skip the fraction for humidity
-        ;; lda #"."
-        ;; jsr print_character
-        ;; PRINT_DEC8 decimal_rh
+        lda integral_temp
+        bpl @not_negative
+        and #$7f
+        lda #'-'
+        jsr lcd_print_character
+@not_negative:
 
-        plp                     ; restore status from dht11_readRawData call
-        beq show_loop_char$     ; if Z is set, then all is well.
+        ;; After stripping the sign bit, the combined 15-bit represented 1/10ths
+        ;; of degrees C.  So divide by 10 for the true integer part:
+        sta value+1
+        lda decimal_temp
+        sta value
+        jsr divide_by_10
+        lda mod10               ; grab the fraction (0..9)
+        pha                     ; save it
+        jsr print_value_in_decimal ; prints what's stored in value
+        lda #'.'
+        jsr lcd_print_character
+        pla                     ; recover fraction
+        clc
+        adc #'0'                ; and just print it since we know it can only be 0..9
+        jsr lcd_print_character
 
-        lda #"E"                ; Report checksum failure
-        jsr print_character
+        lda #' '
+        jsr lcd_print_character
+
+        lda integral_rh
+        sta value+1
+        lda decimal_rh
+        sta value
+        jsr divide_by_10
+        lda mod10
+        pha
+        jsr print_value_in_decimal
+        lda #'.'
+        jsr lcd_print_character
+        pla
+        clc
+        adc #'0'
+        jsr lcd_print_character
+        lda #' '
+        jsr lcd_print_character
+
+        plp                     ; restore status from dht_readRawData call
+        beq @show_loop_char     ; if Z is set, then all is well.
+
+        lda #'E'                ; Report checksum failure
+        jsr lcd_print_character
         PRINT_DEC8 sensor_checksum
-        lda #" "
-        jsr print_character
-        jmp show_loop_char$
+        lda #' '
+        jsr lcd_print_character
+        jmp @show_loop_char
 
-timeout_error$:
-        PRINT_C_STRING timeout_message
+@timeout_error:
+        lda #<timeout_message
+        ldy #>timeout_message
+        jsr lcd_print_string
 
-show_loop_char$:
+@show_loop_char:
         lda loop_counter
         inc
         sta loop_counter
         and #3
         tax
         lda loopchars,x
-        jsr print_character
+        jsr lcd_print_character
 
-        PRINT_C_STRING spaces
+        jsr ANYCNTC
+        beq @quit_program
+        jmp @loop
 
-        jmp loop$
-
-;;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-        .align 8                ; avoid page boundary crossings in irq
-nmi:
-        rti
-
-irq:
-        pha                     ; A is needed in all paths
-        lda #%00000001          ; CA2
-        bit IFR                 ; has CA2 triggered?
-        beq ca2_done$           ; if not skip down
-
-;;; Code for CA2
-        sta IFR                 ; clear the condition
-        lda T1CL                ; grab the timestamp
-        phx                     ; Need another register
-        ldx ca2_producer        ; get the next index
-        sta ca2_buffer,x        ; store stamp in buffer
-        inx                     ; increment and write-back the index
-        stx ca2_producer
-        plx                     ; restore x
-ca2_done$:
-
-        lda #%01000000          ; TIMER1
-        bit IFR                 ; has the timer triggered?
-        beq timer1_done$        ; if not skip down
-
-;;; Code for TIMER1
-        bit T1CL                ; clear condition
-        inc tick_counter        ; increment lsbyte
-        bne timer1_done$      ; roll up as needed
-        inc tick_counter+1
-        bne timer1_done$
-        inc tick_counter+2
-        bne timer1_done$
-        inc tick_counter+3
-timer1_done$:
-
-        pla                     ; restore
-        rti
-
-        ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-        ;; The interrupt & reset vectors
-        .org $fffa
-        .word nmi
-        .word reset
-        .word irq
+@quit_program:
+        jmp WOZSTART
