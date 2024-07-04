@@ -238,6 +238,31 @@ SERIAL_CRLF:
         pla
         rts
 
+;;; Helpers to WozMon, for line editing, backspace & kill line.
+;;; What really needs to be done is to implement a common line editor
+;;; for both wozmon and basic and anyone else who wants to use it.
+cr_clear_right_data:  .byte "\r"
+clear_right_data:     .asciiz "\x1b[K"
+
+CLRRIGHT:
+        phy
+        phx
+        lda #<clear_right_data
+        ldy #>clear_right_data
+        jsr STROUT
+        plx
+        ply
+        rts
+
+CRCLRRIGHT:
+        phx
+        lda #<cr_clear_right_data
+        ldy #>cr_clear_right_data
+        jsr STROUT
+        ldy #$ff                ; see wozmon for why this is done!
+        plx
+        rts
+
 ;;;
 ;;; Prints a null-terminated string via CHROUT
 ;;; A is the low half of the pointer, Y the high half

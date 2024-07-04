@@ -28,6 +28,11 @@ decimal_temp:     .res 1
 sensor_checksum:  .res 1
 timeout_target:   .res 1
 loop_counter:     .res 1
+divisor:          .res 1
+value2:           .res 1
+value3:           .res 1
+mod22:            .res 1
+mod23:            .res 1
 
 DHT_PIN = 7
 DHT_MASK = (1<<DHT_PIN)
@@ -42,6 +47,153 @@ message:        .asciiz "Temperature & RH"
 timeout_message: .asciiz "TIMEOUT "
 loopchars:           .byte "|/-",$a4
 serial_loopchars:      .byte "|/-\\"
+uptime:         .asciiz " Uptime: "
+days:          .asciiz " days, "
+hours:         .asciiz " hours, "
+minutes:         .asciiz " minutes, and "
+seconds:         .asciiz " seconds.\r\n"
+
+.macro PSTR STR
+        lda #<STR
+        ldy #>STR
+        jsr STROUT
+.endmacro
+
+divide_by_divisor:
+        pha
+        phx
+        phy
+        ;; Initialize remainder to zero
+        stz mod10
+        stz mod10 + 1
+        stz mod22
+        stz mod23
+        clc
+
+        ldx #32
+@divloop:
+        ;; Rotate quotient & remainder
+        rol value
+        rol value + 1
+        rol value2
+        rol value3
+        rol mod10
+        rol mod10 + 1
+        rol mod22
+        rol mod23
+
+        ;;  a,y = dividend - divisor
+        sec
+        lda mod10
+        sbc divisor
+        pha                      ; stash low byte for the moment
+        lda mod10 + 1
+        sbc #0
+        pha                     ; stash middle byte
+        lda mod22
+        sbc #0
+        pha                     ; stash next byte
+        lda mod23
+        sbc #0
+        bcc @ignore_result       ; dividend < divisor
+        sta mod23
+        pla
+        sta mod22
+        pla
+        sta mod10 + 1
+        pla
+        sta mod10
+        jmp @continue_loop
+@ignore_result:
+        pla
+        pla
+        pla
+@continue_loop:
+        dex
+        bne @divloop
+
+        rol value               ; final rotate
+        rol value+1
+        rol value2
+        rol value3
+        ply
+        plx
+        pla
+        rts
+
+tick_counter = 4
+
+print_value:
+        jsr divide_by_10
+        lda value
+        beq @skip
+        clc
+        adc #'0'
+        jsr CHROUT
+@skip:
+        lda mod10
+        clc
+        adc #'0'
+        jsr CHROUT
+        rts
+
+report_uptime:
+        sei
+        lda tick_counter
+        sta value
+        lda tick_counter+1
+        sta value+1
+        lda tick_counter+2
+        sta value2
+        lda tick_counter+3
+        cli
+        sta value3
+
+        lda #100
+        sta divisor
+        jsr divide_by_divisor
+        ;; divide by 60 for minutes/seconds - discard remainder
+
+        lda #60
+        sta divisor
+        jsr divide_by_divisor
+        ;; push seconds somewhere for later display
+        lda mod10
+        pha                     ; push seconds
+
+        jsr divide_by_divisor
+        lda mod10
+        pha                 ; push minutes
+
+        lda #24
+        sta divisor
+        jsr divide_by_divisor
+        lda mod10
+        pha                  ; push hours
+
+        ;; value contains days
+        PSTR uptime
+        jsr print_value
+        PSTR days
+
+        pla
+        sta value
+        stz value+1
+        jsr print_value
+        PSTR hours
+
+        pla                     ; minutes
+        sta value
+        stz value+1
+        jsr print_value
+        PSTR minutes
+
+        pla
+        sta value
+        stz value+1
+        jsr print_value
+        PSTR seconds
+        rts
 
 ;;;
 ;;; writes to sensorbytes
@@ -213,14 +365,10 @@ init:
         ldy #>premessage
         jsr lcd_print_string
 
-        lda #<premessage
-        ldy #>premessage
-        jsr STROUT
+        PSTR premessage
         jsr SERIAL_CRLF
 
-        lda #<message
-        ldy #>message
-        jsr STROUT
+        PSTR message
         jsr SERIAL_CRLF
 
 @loop:
@@ -301,9 +449,7 @@ init:
         lda #<timeout_message
         ldy #>timeout_message
         jsr lcd_print_string
-        lda #<timeout_message
-        ldy #>timeout_message
-        jsr STROUT
+        PSTR timeout_message
 
 @show_loop_char:
         lda loop_counter
@@ -317,7 +463,8 @@ init:
 
         lda serial_loopchars,x
         jsr CHROUT
-        jsr SERIAL_CRLF
+
+        jsr report_uptime
 
         jsr ANYCNTC
         beq @quit_program

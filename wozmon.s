@@ -20,28 +20,29 @@ IN:     ; Input buffer, shared with BASIC for low ram
 .export WOZSTART
 .import XModem
 
-WOZSTART:
-        LDA     #$1b           ; starting state, escape
 NOTCR:
         CMP     #$08           ; Backspace key?
         BEQ     BACKSPACE      ; Yes.
-        CMP     #$1B           ; ESC?
-        BEQ     ESCAPE         ; Yes.
-        CMP     #$03           ; Control-C?
-        BEQ     WOZSTART
+        CMP     #$15           ; ^U
+        BNE     NOESCAPE         ; Yes.
+        JSR     CRCLRRIGHT       ; emits cr & clears right and sets Y to -1
+NOESCAPE:
         INY                    ; Advance text index.
         BPL     NEXTCHAR       ; Auto ESC if line longer than 127.
 
+WOZSTART:
 ESCAPE:
         LDA     #$5C           ; "\".
         JSR     ECHO           ; Output it.
 
 GETLINE:
         JSR     SERIAL_CRLF
+GETLINE_NOCRLF:
         LDY     #$01           ; Initialize text index.
 BACKSPACE:
         DEY                    ; Back up text index.
-        BMI     GETLINE        ; Beyond start of line, reinitialize.
+        BMI     GETLINE_NOCRLF ; Beyond start of line, reinitialize.
+        JSR     CLRRIGHT
 
 NEXTCHAR:
         JSR     CHRIN

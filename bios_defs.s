@@ -11,7 +11,7 @@ BIOS_DEFS_S := 1
 .global CHRIN, MONRDKEY, BYTEIN
 .global LOAD, SAVE
 .global ANYCNTC
-.global SERIAL_CRLF
+.global SERIAL_CRLF, CLRRIGHT, CRCLRRIGHT
 .global STROUT
 .global set_forced_rtsb
 .global WOZSTART

@@ -1,10 +1,10 @@
 *~
 *.bin
 *.list
-*.woz
 *.o
 *.map
 *.prog
-*.of64
+*.o64
+*.vice
 bin2ld
 bin2xm
