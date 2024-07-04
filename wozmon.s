@@ -18,20 +18,17 @@ IN:     ; Input buffer, shared with BASIC for low ram
 
 .segment "WOZMON"
 .export WOZSTART
+.import XModem
 
 WOZSTART:
-        lda #<WOZMESSAGE
-        ldy #>WOZMESSAGE
-        JSR STROUT
-
         LDA     #$1b           ; starting state, escape
 NOTCR:
         CMP     #$08           ; Backspace key?
         BEQ     BACKSPACE      ; Yes.
         CMP     #$1B           ; ESC?
         BEQ     ESCAPE         ; Yes.
-        cmp     #$03           ; Control-C?
-        beq     WOZSTART
+        CMP     #$03           ; Control-C?
+        BEQ     WOZSTART
         INY                    ; Advance text index.
         BPL     NEXTCHAR       ; Auto ESC if line longer than 127.
 
@@ -71,13 +68,17 @@ NEXTITEM:
         LDA     IN,Y           ; Get character.
         CMP     #$0D           ; CR?
         BEQ     GETLINE        ; Yes, done this line.
-        CMP     #$2E           ; "."?
+        CMP     #'.'           ; "."?
         BCC     BLSKIP         ; Skip delimiter.
         BEQ     SETBLOCK       ; Set BLOCK XAM mode.
-        CMP     #$3A           ; ":"?
+        CMP     #':'           ; ":"?
         BEQ     SETSTOR        ; Yes, set STOR mode.
-        CMP     #$52           ; "R"?
+        CMP     #'R'           ; "R"?
         BEQ     WOZRUN         ; Yes, run user program.
+        CMP     #'X'           ; "X"?
+        BNE     @SKIPX
+        JMP     XModem         ; Run the Xmodem receiver
+@SKIPX:
         STX     L              ; $00 -> L.
         STX     H              ;    and H.
         STY     YSAV           ; Save Y for comparison
@@ -191,5 +192,3 @@ ECHOLOCAL:
         JMP     ECHO
 LWOZSTART:
         JMP     WOZSTART
-
-WOZMESSAGE:        .asciiz "!WozMon\r\n"

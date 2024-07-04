@@ -8,7 +8,7 @@
 BIOS_DEFS_S := 1
 
 .global CHROUT, MONCOUT
-.global CHRIN, MONRDKEY
+.global CHRIN, MONRDKEY, BYTEIN
 .global LOAD, SAVE
 .global ANYCNTC
 .global SERIAL_CRLF

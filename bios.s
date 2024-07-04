@@ -264,10 +264,9 @@ STROUT:
 syscallpatchngo:
         phx
         tsx                     ; fetch the stack index
-        txa                     ; transfer to A
-        clc                     ; clear carry for addition
-        adc #3                  ; back up to the low byte
-        tax                     ; save to x index
+        inx                     ; increment X index by 3
+        inx
+        inx
         lda $0100,x             ; read the low byte of the retaddr from the stack
         sec                     ; prepare for subtraction
         sbc #1                  ; minus 1
@@ -333,18 +332,26 @@ RESET:
         lda #'.'
         jsr lcd_print_character
 
-        cli                     ; enable interrupts
-
         jsr lcd_clear
         lda #<WELCOME_MESSAGE
         ldy #>WELCOME_MESSAGE
         jsr lcd_print_string
 
+brkcmd:
+        cli
+        ldx #$ff
+        txs
         jmp WOZSTART
 
 IRQ:
         pha
         phx
+
+        ;; was this actually a BRK?
+        tsx
+        lda $0103,x
+        bit #$10
+        bne brkcmd
 
 ;;;
 ;;; The most urgent thing to check for is an input character
