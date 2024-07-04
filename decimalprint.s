@@ -1,13 +1,9 @@
 .setcpu "65C02"
 .debuginfo +
 .feature string_escapes on
-
-.import lcd_print_character
-.export value, mod10, divide_by_10, print_value_in_decimal
-
-.zeropage
-value:  .res 2
-mod10:  .res 2
+.include "decimalprint_defs.s"
+.include "lcd_defs.s"
+.include "syscall_defs.s"
 
 .code
 ;;; Dividend in value, value+1

@@ -1,6 +1,7 @@
 .setcpu "65C02"
 .export repeat
 .include "syscall_defs.s"
+        ALLSYSCALL .global
 .bss
 .align $100
 Array:       .res $800
@@ -34,6 +35,8 @@ addr2:     .res 2
 .endmacro
 
 .code
+.import __BSS_RUN__, __BSS_SIZE__
+
 start:
         jsr dotree
         jmp WOZSTART
@@ -42,12 +45,12 @@ dotree:
         jsr SERIAL_CRLF
 
         ;; Zero out $800 bytes, or $8 pages
-        lda #<Array
+        lda #<__BSS_RUN__
         sta addr0
-        lda #>Array
+        lda #>__BSS_RUN__
         sta addr0+1
 
-        ldx #$8
+        ldx #>__BSS_SIZE__
         ldy #0
         lda #0
 @clearloop:
@@ -57,6 +60,14 @@ dotree:
         inc addr0+1              ; up the page component of the stored address
         dex
         bne @clearloop
+
+        ldy #<__BSS_SIZE__
+        beq @skiplsbloop
+@clearlsbloop:
+        sta (addr0),y
+        dey
+        bne @clearlsbloop
+@skiplsbloop:
 
         ;; I = 0
         stz i_index

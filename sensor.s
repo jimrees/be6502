@@ -1,16 +1,16 @@
 .setcpu "65C02"
 .debuginfo +
 .feature string_escapes on
-.include "syscall_defs.s"
-.export lcd_print_character
-.exportzp tick_counter
 
-.include "via.s"
+.include "bios_defs.s"          ; CHROUT, CHRIN, ...
+.include "via_defs.s"
 .include "macros.s"
 .include "decimalprint_defs.s"
 .include "timer_defs.s"
+.include "lcd_defs.s"
+.include "syscall_defs.s"
 
-.import delayseconds, delayticks
+ALLSYSCALL .global
 
 ;;; For simplicity, this is a full page.  More complex code could
 ;;; reduce it to 4 slots probably, if needed.  If reduced, it could
@@ -40,7 +40,8 @@ start:
 premessage:     .asciiz "Good Morning"
 message:        .asciiz "Temperature & RH"
 timeout_message: .asciiz "TIMEOUT "
-loopchars:      .byte "|/-",$a4
+loopchars:           .byte "|/-",$a4
+serial_loopchars:      .byte "|/-\\"
 
 ;;;
 ;;; writes to sensorbytes
@@ -212,8 +213,18 @@ init:
         ldy #>premessage
         jsr lcd_print_string
 
+        lda #<premessage
+        ldy #>premessage
+        jsr STROUT
+        jsr SERIAL_CRLF
+
+        lda #<message
+        ldy #>message
+        jsr STROUT
+        jsr SERIAL_CRLF
+
 @loop:
-        lda #2
+        lda #5
         jsr delayseconds
 
         jsr lcd_clear
@@ -232,7 +243,8 @@ init:
         bpl @not_negative
         and #$7f
         lda #'-'
-        jsr lcd_print_character
+        jsr print_char_to_both
+
 @not_negative:
 
         ;; After stripping the sign bit, the combined 15-bit represented 1/10ths
@@ -243,16 +255,16 @@ init:
         jsr divide_by_10
         lda mod10               ; grab the fraction (0..9)
         pha                     ; save it
-        jsr print_value_in_decimal ; prints what's stored in value
+        jsr both_value_in_decimal ; prints what's stored in value
         lda #'.'
-        jsr lcd_print_character
+        jsr print_char_to_both
         pla                     ; recover fraction
         clc
         adc #'0'                ; and just print it since we know it can only be 0..9
-        jsr lcd_print_character
+        jsr print_char_to_both
 
         lda #' '
-        jsr lcd_print_character
+        jsr print_char_to_both
 
         lda integral_rh
         sta value+1
@@ -261,30 +273,37 @@ init:
         jsr divide_by_10
         lda mod10
         pha
-        jsr print_value_in_decimal
+        jsr both_value_in_decimal
+
         lda #'.'
-        jsr lcd_print_character
+        jsr print_char_to_both
         pla
         clc
         adc #'0'
-        jsr lcd_print_character
+        jsr print_char_to_both
         lda #' '
-        jsr lcd_print_character
+        jsr print_char_to_both
 
         plp                     ; restore status from dht_readRawData call
         beq @show_loop_char     ; if Z is set, then all is well.
 
         lda #'E'                ; Report checksum failure
-        jsr lcd_print_character
-        PRINT_DEC8 sensor_checksum
+        jsr print_char_to_both
+        lda sensor_checksum
+        sta value
+        stz value+1
+        jsr both_value_in_decimal
         lda #' '
-        jsr lcd_print_character
+        jsr print_char_to_both
         jmp @show_loop_char
 
 @timeout_error:
         lda #<timeout_message
         ldy #>timeout_message
         jsr lcd_print_string
+        lda #<timeout_message
+        ldy #>timeout_message
+        jsr STROUT
 
 @show_loop_char:
         lda loop_counter
@@ -292,8 +311,13 @@ init:
         sta loop_counter
         and #3
         tax
+
         lda loopchars,x
         jsr lcd_print_character
+
+        lda serial_loopchars,x
+        jsr CHROUT
+        jsr SERIAL_CRLF
 
         jsr ANYCNTC
         beq @quit_program
@@ -301,3 +325,39 @@ init:
 
 @quit_program:
         jmp WOZSTART
+
+
+;;; value must contain the number
+;;; A,X,Y will all be trashed.
+both_value_in_decimal:
+        ;; push digits onto the stack, then unwind to print
+        ;; the in the right order.
+        lda #0                  ; push a null char on the stack
+        pha
+@next_digit:
+        jsr divide_by_10
+        lda mod10
+        clc
+        adc #'0'
+        pha
+        ;; If any part of the quotient is > 0, go again.
+        lda value
+        ora value+1
+        bne @next_digit
+        pla
+@unfold_print_loop:
+        pha
+        jsr CHROUT
+        pla
+        jsr lcd_print_character
+        pla                     ; pop the next one
+        bne @unfold_print_loop  ; if not-null, keep looping
+
+        rts
+
+print_char_to_both:
+        pha
+        jsr lcd_print_character
+        pla
+        jsr CHROUT
+        rts

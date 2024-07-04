@@ -1,7 +1,7 @@
 .setcpu "65C02"
 .debuginfo +
 .feature string_escapes on
-.import CHROUT, ANYCNTC, CHRIN, SERIAL_CRLF, STROUT
+.include "bios_defs.s"
 
 .ZEROPAGE
 XAML:   .res 1      ; Last "opened" location Low

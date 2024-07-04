@@ -2,80 +2,54 @@
 .debuginfo +
 .feature string_escapes on
 
-.export SERIAL_CRLF
-.export CHRIN, CHROUT, MONCOUT, MONRDKEY, STROUT, LOAD, SAVE
-.export ANYCNTC, AAA_GO_BASIC, DOPRASTAT
-.export input_buffer, output_buffer, irqHook, defaultIRQHook
-.export returnL, tick_counter, txDelay
+.include "bios_defs.s"
+.include "timer_defs.s"
+.include "via_defs.s"
+.include "acia_defs.s"
+.include "lcd_defs.s"
+.include "syscall_defs.s"
+
+ALLSYSCALL .global
 
 .import COLD_START
-.import WOZSTART
-.import serial_initialization
-.import lcd_home, lcd_print_binary8, lcd_clear, lcd_print_character
-.import lcd_set_position, lcd_initialization, lcd_print_hex8, lcd_print_n_spaces
-.import lcd_print_string
-.import timer_initialization
-
-.include "via.s"
-.include "acia_defs.s"
 
 .segment "BIOSZP" : zeropage
 START_OF_ZERO_INIT:
+loc_value:      .res 2          ; aka value
+loc_mod10:      .res 2          ; aka mod10
 tick_counter:   .res 4          ; used by the timer interrupt
-
+txDelay:        .res 2          ; tune-able value for ACIA output delay
 o_busy:         .res 1          ; serial interrupt managemetn [BUSY ...]
+iproducer_ptr:  .res 1
+iconsumer_ptr:  .res 1
+oproducer_ptr:  .res 1
+oconsumer_ptr:  .res 1
+
 .ifdef HARDWARE_FLOW_CONTROL
 ctsb_state:     .res 1 ; [CTSB ...]
 forced_rtsb:    .res 1 ; [FORCED ...]
 .endif
 
-returnL:        .res 2          ; used primarily by syscallpatchngo, but also for general use as a 2-byte temporary
-
-patchAddr:      .res 2
-iproducer_ptr:  .res 1
-iconsumer_ptr:  .res 1
-oproducer_ptr:  .res 1
-oconsumer_ptr:  .res 1
 END_OF_ZERO_INIT:
-txDelay:        .res 2          ; tune-able value for ACIA output delay
-irqHook:        .res 2
+
+;;; Temporaries in the zeropage for anyone to use at their own risk
+tmp0:   .res 1
+tmp1:   .res 1
+tmp2:   .res 1
+tmp3:   .res 1
+
 .segment "BIOS_BUFFERS"
 ;;; As circular buffers indexed by an 8-bit value, these must be page-aligned
 .align 256
 input_buffer:   .res $100
 output_buffer:  .res $100
 
+;;; Use our own code segment to guarantee AAA_GO_BASIC shows up at $8000
 .segment "BIOS_CODE"
 
-.macro SET_RTSB_A
-        lda #$80
-        tsb PORTB
-.endmacro
-
-.macro CLEAR_RTSB_A
-        lda #$80
-        trb PORTB
-.endmacro
-
-;;; A hack so that 8000R always gets to Basic
 AAA_GO_BASIC:
         jmp COLD_START
 
-;;; Called from BASIC to print ACIA_STATUS on the lcd
-DOPRASTAT:
-        pha
-        jsr lcd_home
-        lda ACIA_STATUS
-        jsr lcd_print_binary8
-
-.ifdef HARDWARE_FLOW_CONTROL
-        lda #' '
-        jsr lcd_print_character
-        lda ctsb_state
-        jsr lcd_print_hex8
-.endif
-
-        pla
 LOAD:
 SAVE:
         rts
@@ -146,13 +120,13 @@ ANYCNTC:
         cmp #$03                ; set Z accordingly
         rts
 
-;;; CHRIN
-;;; Consumes an input character from the buffer if present.
+;;; BYTEIN
+;;; Consumes an input byte from the buffer if present.
 ;;; Sets C true if present & consumed, else C = 0.
-;;; Return the character (if it exists) in A.
-;;; Modifies A, flags
+;;; Return the byte (if it exists) in A.
+;;; Modifies flags
 ;;;
-CHRIN:
+BYTEIN:
         lda iproducer_ptr
         cmp iconsumer_ptr
         bne @key_was_pressed    ; if none, we can return failure right away
@@ -177,12 +151,24 @@ CHRIN:
         lda input_buffer,x
         inc iconsumer_ptr
 
-        jsr CHROUT              ; echo
-
         sec                     ; indicate success
         plx                     ; restore X
         rts
 
+
+;;;
+;;; CHRIN - reads a character, if available from the input buffer.
+;;; If successful, the character will be echo'd back to the output buffer,
+;;; it will be returned in the A register, and the Carry flag will be set.
+;;; If unsuccessful, the carry flag will be cleared.
+;;;
+CHRIN:
+        jsr BYTEIN
+        bcc @noecho
+        jsr CHROUT
+        sec
+@noecho:
+        rts
 
 ;;;
 ;;; MONRDKEY - spins on CHRIN until a character is available
@@ -257,11 +243,11 @@ SERIAL_CRLF:
 ;;; A is the low half of the pointer, Y the high half
 ;;; Modifies A, Y, flags, and returnL, returnL+1
 STROUT:
-        sta returnL
-        sty returnL+1
+        sta tmp0
+        sty tmp1
         ldy #0
 @loop:
-        lda (returnL),y
+        lda (tmp0),y
         beq @end_of_string
         jsr CHROUT
         iny
@@ -274,6 +260,7 @@ STROUT:
 ;;; The stub also pushed A.
 ;;; This climbs the stack and patches the original JSR call
 ;;; so that future calls go direct.
+;;; The destination target address is stored in tmp0/tmp1
 syscallpatchngo:
         phx
         tsx                     ; fetch the stack index
@@ -284,54 +271,22 @@ syscallpatchngo:
         lda $0100,x             ; read the low byte of the retaddr from the stack
         sec                     ; prepare for subtraction
         sbc #1                  ; minus 1
-        sta returnL
+        sta tmp2
         inx
         lda $0100,x             ; read the high byte of the retaddr from the stack
         sbc #0                  ; finish the subtraction in the high byte
-        sta returnL+1
+        sta tmp3
         plx                     ; done with X
-        phy                     ; Y needed for sta (returnL),y
+        phy                     ; Y needed for sta (tmp2),y
         ldy #0
-        lda patchAddr
-        sta (returnL),y
-        lda patchAddr+1
+        lda tmp0
+        sta (tmp2),y
+        lda tmp1
         iny
-        sta (returnL),y
+        sta (tmp2),y
         ply
         pla                     ; restore A (pushed by caller)
-        jmp (patchAddr)         ; luckily this requires no registers
-
-
-restore_default_irq_hook:
-        pha
-        lda #<defaultIRQHook
-        sta irqHook
-        lda #>defaultIRQHook
-        sta irqHook+1
-        pla
-        rts
-
-;;;
-;;; A&Y contain a pointer to the new hook
-;;; The old hook is returned in A/Y
-install_irq_hook:
-        pha
-        phy
-        ;; copy current hook elsewhere temporarily
-        lda irqHook
-        sta returnL
-        lda irqHook+1
-        sta returnL+1
-
-        ;; install the new hook
-        ply
-        sty irqHook+1
-        pla
-        sta irqHook
-
-        lda returnL
-        ldy returnL+1
-        rts
+        jmp (tmp0)              ; luckily this requires no registers
 
 ;;;
 ;;; A flag to force RTSB.  A program may have a need to abuse the system and block
@@ -367,7 +322,6 @@ RESET:
         cpx #(END_OF_ZERO_INIT - START_OF_ZERO_INIT)
         bne @clearzp
 
-        jsr restore_default_irq_hook
         jsr timer_initialization
         jsr lcd_initialization
 
@@ -509,12 +463,7 @@ IRQ:
 @irq_done:
         plx
         pla
-        ;; jmp (irqHook)  - possibly too expensive
         rti
-
-defaultIRQHook:
-        rti
-
 
 NMI:    rti
 
@@ -531,29 +480,14 @@ NMI:    rti
 .ident(.concat("SYS_",.string(TARGET))):
         pha
         lda #<TARGET
-        sta patchAddr
+        sta tmp0
         lda #>TARGET
-        sta patchAddr+1
+        sta tmp1
         jmp syscallpatchngo
         jmp TARGET              ; alternate re-jump point if you don't want the patch
 .endmacro
 
-        MKSYSCALL CHROUT
-        MKSYSCALL CHRIN
-        MKSYSCALL ANYCNTC
-        MKSYSCALL lcd_clear
-        MKSYSCALL lcd_home
-        MKSYSCALL lcd_set_position
-        MKSYSCALL lcd_print_hex8
-        MKSYSCALL lcd_print_binary8
-        MKSYSCALL lcd_print_character
-        MKSYSCALL lcd_print_n_spaces
-        MKSYSCALL SERIAL_CRLF
-        MKSYSCALL STROUT
-        MKSYSCALL lcd_print_string
-        MKSYSCALL restore_default_irq_hook
-        MKSYSCALL install_irq_hook
-        MKSYSCALL set_forced_rtsb
+        ALLSYSCALL MKSYSCALL
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 .segment "RESETVEC"

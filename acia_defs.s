@@ -2,18 +2,23 @@
 ACIA_DEFS_H := 1
 
 .include "timer_defs.s"
+.include "via_defs.s"
 
-ACIA_DATA = $4000
-ACIA_STATUS = $4001      ; IRQ DSRB DCDB TXEMPTY RXFULL OVR FERR PERR
-ACIA_CMD = $4002
-ACIA_CTRL = $4003
+.global ACIA_DATA
+.global ACIA_STATUS      ; IRQ DSRB DCDB TXEMPTY RXFULL OVR FERR PERR
+.global ACIA_CMD
+.global ACIA_CTRL
 
-BAUD_RATE = 19200
+.global serial_initialization
 
-;;; The # CPU clock ticks to wait after transmit of a byte
-;;; since the chip won't tell us anything useful.
-;;; At 19,200 this is 520 ticks.
-;;; The IRQ overhead is 100 cycles because the output
-;;; serving occurs later.
-DELAY_CLOCKS = ((CLOCKS_PER_SECOND*10)/BAUD_RATE - 95)
+.macro SET_RTSB_A
+        lda #$80
+        tsb PORTB
+.endmacro
+
+.macro CLEAR_RTSB_A
+        lda #$80
+        trb PORTB
+.endmacro
+
 .endif

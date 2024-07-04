@@ -3,40 +3,15 @@
 .feature string_escapes on
 
 .include "syscall_defs.s"
+        ALLSYSCALL .global
 
 .zeropage
-        counter = $00
+counter:
 
 .code
-        ;; This steps on X and A registers
-        .macro PRINT_STRING location, PRINTER, DELIMITER
-        .local start
-        .local end
-        ldx #0
-        start:
-        lda location, x
-        .if DELIMITER <> 0
-        cmp #DELIMITER
-        .endif
-        beq end
-        jsr PRINTER
-        inx
-        jmp start
-        end:
-        .endmacro
-
-        .macro PRINT_C_STRING location, PRINTER
-        PRINT_STRING location, PRINTER, 0
-        .endmacro
-        .macro LCD_PRINT_STRING location, DELIMITER
-        PRINT_STRING location, lcd_print_character, DELIMITER
-        .endmacro
-        .macro LCD_PRINT_C_STRING location
-        PRINT_STRING location, lcd_print_character, 0
-        .endmacro
-
         ;; 20 - 7e inclusive are the printable ascii chars
         ;; A1 - FF
+        stz counter
         lda #$40
         jsr lcd_set_position
         lda #<lcdmessage
@@ -47,12 +22,9 @@
         ldy #>serialmessage
         jsr STROUT
 
-        ldy #100
 reinit:
         jsr SERIAL_CRLF
         jsr ANYCNTC
-        beq gowozstart
-        dey
         beq gowozstart
 
         inc counter
@@ -81,4 +53,4 @@ gowozstart:
         jmp WOZSTART
 
 lcdmessage:     .asciiz "PRINTCHARS"
-serialmessage:     .asciiz "\r\n>> PRINTCHARS <<"
+serialmessage:  .asciiz "\r\n>> PRINTCHARS <<"

@@ -3,10 +3,8 @@
 .feature string_escapes on
 .include "timer_defs.s"
 .include "macros.s"
-.include "via.s"
-
-.importzp value, tick_counter
-.export timer_initialization, delayseconds, delayticks
+.include "via_defs.s"
+.include "decimalprint_defs.s"
 
 .code
 timer_initialization:

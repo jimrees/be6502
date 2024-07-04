@@ -1,19 +1,16 @@
 .setcpu "65C02"
 .debuginfo +
 .feature string_escapes on
-.include "via.s"
-
-.export lcd_print_character, lcd_clear, lcd_home, lcd_set_position, lcd_initialization
-.export lcd_print_binary8, lcd_print_hex8, lcd_print_n_spaces, lcd_print_string
-
-.importzp returnL
+.include "via_defs.s"
+.include "lcd_defs.s"
+.include "bios_defs.s"
 
 ;;; Display control bits - where they live on PORTB
 E  = %01000000
 RW = %00100000
 RS = %00010000
 
-.segment "BIOS_CODE"
+.code
 
 ;;; lcd_wait should be safe in either 8-bit or 4-bit modes In 8-bit
 ;;; mode, we are pulling only the high 4 bits anyway (due to how the
@@ -103,11 +100,11 @@ lcd_print_character:
         rts
 
 lcd_print_string:
-        sta returnL
-        sty returnL+1
+        sta tmp0
+        sty tmp1
         ldy #0
 @loop:
-        lda (returnL),y
+        lda (tmp0),y
         beq @end_of_string
         jsr lcd_print_character
         iny

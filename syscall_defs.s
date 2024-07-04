@@ -1,24 +1,37 @@
 .ifndef SYSCALLDEFS_S
         SYSCALLDEFS_S := 1
 
-;;; Should I have some sort of version check?
+        ;; The point here is to declare things the ROM provides at
+        ;; stable locations.  So, that's what we're going to do with
+        ;; a few zeropage locations too -- needed as parts of the api.
+        value = $00               ; two bytes
+        mod10 = $02               ; two bytes
+.global WOZSTART
+.global MONCOUT
 
-        CHROUT = $F000
-        CHRIN = $F010
-        ANYCNTC = $F020
-        lcd_clear = $F030
-        lcd_home = $F040
-        lcd_set_position = $F050
-        lcd_print_hex8 = $F060
-        lcd_print_binary8 = $F070
-        lcd_print_character = $F080
-        lcd_print_n_spaces = $F090
-        SERIAL_CRLF = $F0A0
-        STROUT = $F0B0
-        lcd_print_string = $F0C0
-        restore_default_irq_hook = $F0D0
-        install_irq_hook = $F0E0
-        set_forced_rtsb = $F0F0
-        WOZSTART = $FF00
-        tick_counter = $00
+.macro ALLSYSCALL CALLER
+        CALLER CHROUT
+        CALLER CHRIN
+        CALLER MONRDKEY
+        CALLER ANYCNTC
+        CALLER SERIAL_CRLF
+        CALLER STROUT
+        CALLER BYTEIN
+        CALLER LOAD
+        CALLER SAVE
+        CALLER lcd_clear
+        CALLER lcd_home
+        CALLER lcd_set_position
+        CALLER lcd_print_hex8
+        CALLER lcd_print_binary8
+        CALLER lcd_print_character
+        CALLER lcd_print_n_spaces
+        CALLER lcd_print_string
+        CALLER divide_by_10
+        CALLER print_value_in_decimal
+        CALLER set_forced_rtsb
+        CALLER delayseconds
+        CALLER delayticks
+.endmacro
+
 .endif
