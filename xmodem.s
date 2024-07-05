@@ -1,6 +1,10 @@
+.ifdef REES
 .setcpu "65C02"
 .debuginfo +
 .include "bios_defs.s"
+.importzp XAML, XAMH
+.endif
+
 ; XMODEM/CRC Receiver for the 65C02
 ;
 ; By Daryl Rictor & Ross Archer  Aug 2002
@@ -55,7 +59,7 @@
 ; zero page variables (adjust these to suit your needs)
 ;
 ;
-.if 0
+.ifndef REES
 crc		=	$38		; CRC lo byte  (two byte variable)
 crch		=	$39		; CRC hi byte
 
@@ -68,6 +72,7 @@ retry2		=	$3e		; 2nd counter
 bflag		=	$3f		; block flag
 .else
 .zeropage
+;;; let the linker decide where to put these
 crc:    .res 1
 crch:   .res 1
 ptr:    .res 1
@@ -82,10 +87,11 @@ bflag:  .res 1
 ; non-zero page variables and buffers
 ;
 ;
-.if 0
+.ifndef REES
 Rbuff		=	$0300      	; temp 132 byte receive buffer
 					;(place anywhere, page aligned)
 .else
+;;; see linker config - buffer shared with wozmon
 .segment "XMBSS" : absolute
 .align 256
 Rbuff:  .res 132
@@ -128,7 +134,7 @@ ESC		=	$1b		; ESC to exit
 ; v 1.0 recode for use with SBC2
 ; v 1.1 added block 1 masking (block 257 would be corrupted)
 
-.if 0
+.ifndef REES
 	*= 	$7B00		; Start of program (adjust to your needs)
 .else
 .code
@@ -217,9 +223,15 @@ GoodCrc:        ldx	#$02		;
 		beq	CopyBlk		; no, copy all 128 bytes
 		lda	Rbuff,x		; get target address from 1st 2 bytes of blk 1
 		sta	ptr		; save lo address
+.ifdef REES
+                sta     XAML    ; let wozmon know about this interesting address
+.endif
 		inx			;
 		lda	Rbuff,x		; get hi address
 		sta	ptr+1		; save it
+.ifdef REES
+                sta     XAMH
+.endif
 		inx			; point to first byte of data
 		dec	bflag		; set the flag so we won't get another address
 CopyBlk:        ldy	#$00		; set offset to zero
@@ -315,7 +327,7 @@ GoodMsg:        .byte 	"Upload Successful!"
 ; You would call the ACIA_Init prior to running the xmodem transfer
 ; routine.
 ;
-.if 0
+.ifndef REES
 ACIA_Data	=	$7F70		; Adjust these addresses to point
 ACIA_Status	=	$7F71		; to YOUR 6551!
 ACIA_Command	=	$7F72		;
@@ -347,7 +359,7 @@ Put_Chr1:       lda	ACIA_Status     ; serial port status
                	sta	ACIA_Data       ; put character to Port
                	RTS                     ; done
 .else
-        Get_Chr = BYTEIN
+        Get_Chr = BYTEIN        ; does not echo
         Put_Chr = CHROUT
 .endif
 

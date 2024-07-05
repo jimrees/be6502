@@ -7,7 +7,7 @@ clean:
 #ASSEMBLER_LISTINGS=--list-bytes 255 --verbose -l $*.list
 
 %.o: %.s $(wildcard *_defs.s)
-	ca65 -D HARDWARE_FLOW_CONTROL=1 $(ASSEMBLER_LISTINGS) $<
+	ca65 -D REES=1 -D HARDWARE_FLOW_CONTROL=1 $(ASSEMBLER_LISTINGS) $<
 
 ################################################################
 # Build/burn/verify the bios

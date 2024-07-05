@@ -3,6 +3,8 @@
 .feature string_escapes on
 .include "bios_defs.s"
 
+.export XAML,XAMH   ; so Xmodem can write here from the loaded address
+
 .ZEROPAGE
 XAML:   .res 1      ; Last "opened" location Low
 XAMH:   .res 1      ; Last "opened" location High
@@ -13,12 +15,14 @@ H:      .res 1      ; Hex value parsing High
 YSAV:   .res 1      ; Used to see if hex value is given
 MODE:   .res 1      ; $00=XAM, $7F=STOR, $AE=BLOCK XAM
 
-.segment "BASRAM"
-IN:     ; Input buffer, shared with BASIC for low ram
+.segment "XMBSS"
+IN:     ; Input buffer, shared with XModem
 
 .segment "WOZMON"
 .export WOZSTART
 .import XModem
+WOZSTART:
+        jmp ESCAPE
 
 NOTCR:
         CMP     #$08           ; Backspace key?
@@ -30,7 +34,6 @@ NOESCAPE:
         INY                    ; Advance text index.
         BPL     NEXTCHAR       ; Auto ESC if line longer than 127.
 
-WOZSTART:
 ESCAPE:
         LDA     #$5C           ; "\".
         JSR     ECHO           ; Output it.

@@ -123,18 +123,26 @@ divide_by_divisor:
 
 tick_counter = 4
 
-print_value:
+serial_print_value_in_decimal:
+        ;; push digits onto the stack, then unwind to print
+        ;; the in the right order.
+        lda #0                  ; push a null char on the stack
+        pha
+@next_digit:
         jsr divide_by_10
-        lda value
-        beq @skip
-        clc
-        adc #'0'
-        jsr CHROUT
-@skip:
         lda mod10
         clc
         adc #'0'
+        pha
+        ;; If any part of the quotient is > 0, go again.
+        lda value
+        ora value+1
+        bne @next_digit
+        pla
+@unfold_print_loop:
         jsr CHROUT
+        pla                     ; pop the next one
+        bne @unfold_print_loop  ; if not-null, keep looping
         rts
 
 report_uptime:
@@ -173,25 +181,25 @@ report_uptime:
 
         ;; value contains days
         PSTR uptime
-        jsr print_value
+        jsr serial_print_value_in_decimal
         PSTR days
 
         pla
         sta value
         stz value+1
-        jsr print_value
+        jsr serial_print_value_in_decimal
         PSTR hours
 
         pla                     ; minutes
         sta value
         stz value+1
-        jsr print_value
+        jsr serial_print_value_in_decimal
         PSTR minutes
 
         pla
         sta value
         stz value+1
-        jsr print_value
+        jsr serial_print_value_in_decimal
         PSTR seconds
         rts
 
