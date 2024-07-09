@@ -1,3 +1,10 @@
+;;;
+;;; Based on the following obfuscated C code which emits a
+;;; "Christmas Tree".
+;;;
+;;; int a[4<<9],i;main(){for(a[40]=1;i++<1620;printf(i%80?"%c":"\n"," .oO"
+;;; [a[i]&3]),a[i+79]+=a[i],a[i+81]+=a[i])a[1304]=a[1336]=0;}
+;;;
 .setcpu "65C02"
 .export repeat
 .include "syscall_defs.s"

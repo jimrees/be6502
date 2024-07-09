@@ -22,6 +22,9 @@ IN:     ; Input buffer, shared with XModem
 .export WOZSTART
 .import XModem
 WOZSTART:
+        ;; In case a program forgot to release forced_rtsb
+        lda #0
+        jsr set_forced_rtsb
         jmp ESCAPE
 
 NOTCR:

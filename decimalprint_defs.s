@@ -1,8 +1,8 @@
 .ifndef DECIMALPRINT_DEFS_S
         DECIMALPRINT_DEFS_S := 1
 
-.globalzp value, mod10
 .global print_value_in_decimal, divide_by_10
+.globalzp value, mod10
 
 .macro PRINT_DEC16 address
         sei

@@ -1,3 +1,16 @@
+;;;
+;;; This program plays with a DHT22 temperature/humidity sensor with
+;;; the dataline attached to PORTA.7 and also CA2 on the VIA.  We need
+;;; to be able to drive the pin low, then release it (by switching to
+;;; input mode), then sampling timestamps when the line has a
+;;; down-edge 42 times after the release.
+;;;
+;;; The down-edges can be as little as 75usec apart and we cannot
+;;; afford to miss any of them.  So the general interrupt handler of
+;;; the bios is too slow for this.  So, here we just poll the CA2
+;;; condition with interrupts disabled.  During that disabling period,
+;;; "forced" RTSB is enabled to avoid missing serial input.
+;;;
 .setcpu "65C02"
 .debuginfo +
 .feature string_escapes on
@@ -258,10 +271,10 @@ dht_readRawData:
 @next_bit:
 
 .if 0
-;;; If we have to spin anyway, might as well just spin on the signal bit
-;;; and forget about downedge detection.
-;;; But be careful -- we have to be "on it" as each half of the pulse is
-;;; that much shorter -- the up-part of a 0-bit is only 26 cycles!
+;;; Alternative method - skip the extra wire to CA2.  Just spin on the
+;;; value on Pin #7.
+;;; Be careful -- we have to be "on it" as each half of the pulse is
+;;; that much shorter -- the up-part of a first bit is only 26 us!
 @spin_until_up:
         lda #DHT_MASK
         bit PORTA
