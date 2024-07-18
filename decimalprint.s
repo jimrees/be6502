@@ -14,9 +14,8 @@ divide_by_10:
         phx
         phy
         ;; Initialize remainder to zero
-        lda #0
-        sta mod10
-        sta mod10 + 1
+        stz mod10
+        stz mod10 + 1
         clc
 
         ldx #16

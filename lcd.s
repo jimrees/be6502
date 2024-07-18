@@ -133,15 +133,6 @@ lcd_initialization:
         lda #%01111111
         tsb DDRB
 
-        ;; short delay via spin ~40us
-        ldy #157
-        ldx #0
-@spinloop:
-        dex
-        bne @spinloop
-        dey
-        bne @spinloop
-
         ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
         ;; Be clever - to get to 4-bit mode reliably, first go into
