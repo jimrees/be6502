@@ -26,6 +26,7 @@ bios.bin: bios.cfg bios.o wozmon.o msbasic/tmp/msbasic.o lcd.o acia.o timer.o de
 christmas.o64: christmas.o prog.cfg
 printchars.o64: printchars.o prog.cfg
 sensor.o64: sensor.o via.o prog.cfg
+ilcdtest.o64: ilcdtest.o libi2c.o libilcd.o via.o prog.cfg
 
 msbasic/tmp/msbasic.o: ALWAYS
 	$(MAKE) -C msbasic
@@ -34,7 +35,7 @@ msbasic.o64: msbasic/tmp/msbasic.o basic.cfg
 
 
 #VERBOSE=-v
-GEN_VICE=-Ln $*.vice
+#GEN_VICE=-Ln $*.vice
 #GEN_MAP=-m $*.map
 
 %.o64: o64header.o syscalls.o
