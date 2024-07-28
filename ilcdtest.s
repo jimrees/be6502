@@ -70,27 +70,12 @@ start:
 
         SERIAL_PSTR initdone
 
-        jsr ilcd_clear
-        jsr ilcd_readbusy
-        jsr serial_print_A_in_hex
-        jsr SERIAL_CRLF
-        jsr SERIAL_CRLF
-
-        lda #$0
-        jsr ilcd_set_position
+        jsr ilcd_home
 
         lda #< hellostr
-        sta TMP_PTR
-        lda #> hellostr
-        sta TMP_PTR+1
-        ldy #0
-@loop:
-        lda (TMP_PTR),y
-        beq @done
-        jsr ilcd_write_char
-        iny
-        jmp @loop
-@done:
+        ldy #> hellostr
+        jsr ilcd_print_string
+
         lda TICK_COUNTER
         jsr ilcd_print_A_in_hex
         lda T1CH
@@ -107,11 +92,9 @@ start:
         lda (TMP_PTR),y
         jsr ilcd_write_char
 
-.if 1
         jsr ilcd_read_ac
         jsr serial_print_A_in_hex
         jsr SERIAL_CRLF
-.endif
 
         iny
         cpy #8

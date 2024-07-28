@@ -25,7 +25,7 @@ INST:   .res 1
 ; A = msg low byte
 ; X = msg high byte
 ; ---------------------------------------------
-isend_lcd_message:
+ilcd_print_string:
         sta LCD_STRPTR
         sty LCD_STRPTR + 1
         ldy #0
@@ -86,6 +86,7 @@ ilcd_init:
 
         lda #%00000001
         jsr ilcd_instruction ; clear display
+        jsr ilcd_wait
 
         lda #%00000110
         jsr ilcd_instruction ; Increment cursor, do not shift display
@@ -108,13 +109,13 @@ ilcd_cursor_off:
 ilcd_home:
         lda #%00000010
         jsr ilcd_instruction
+        jsr ilcd_wait
         rts
 
 ilcd_clear:
         lda #%00000001
         jsr ilcd_instruction
-        ;; lda #%00000100
-        ;; jsr lcd_instruction ; Decrement cursor, and do not shift
+        jsr ilcd_wait
         rts
 
 ; ---------------------------------------------
@@ -123,7 +124,7 @@ ilcd_clear:
 ; ---------------------------------------------
 ilcd_instruction:
         sta INST                ; save full instruction
-        jsr ilcd_wait
+        ;; jsr ilcd_wait
         LCD_I2C_Prefix
         lda INST                ; fetch instruction
         and #$f0                ; clear low nibble
@@ -148,7 +149,7 @@ ilcd_instruction:
 ; ---------------------------------------------
 ilcd_write_char:
         sta INST
-        jsr ilcd_wait
+        ;; jsr ilcd_wait
         LCD_I2C_Prefix
         ;; bcs @fail?
         lda INST
@@ -222,7 +223,7 @@ ilcd_readbusy:
         LCD_I2C_Prefix
         lda #RCMD
         jsr I2C_SendByte
-        eor #(%10000000|LCD_EN)
+        ora #(%10000000|LCD_EN)
         jsr I2C_SendByte
         LCD_I2C_RPrefix
         jsr I2C_ReadByte
@@ -231,7 +232,7 @@ ilcd_readbusy:
         LCD_I2C_Prefix
         lda #RCMD
         jsr I2C_SendByte        ; E DOWN
-        eor #LCD_EN
+        ora #LCD_EN
         jsr I2C_SendByte        ; E UP
         eor #LCD_EN
         jsr I2C_SendByte        ; E DOWN to complete transaction

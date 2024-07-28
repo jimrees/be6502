@@ -58,9 +58,11 @@ ZP_I2C_DATA:    .res 1
 ;------------------------------------------------------------------------------
 ; Destroys A
 ;------------------------------------------------------------------------------
-        lda   #I2C_CLOCKBIT
-        trb   I2C_DDR           ; Clock up
-        tsb   I2C_DDR           ; Clock down
+        lda   I2C_DDR
+        and   #(~I2C_CLOCKBIT & $ff)
+        sta   I2C_DDR
+        ora   #I2C_CLOCKBIT
+        sta   I2C_DDR
     .endmacro
 
 
@@ -172,11 +174,13 @@ I2C_SendByte:
         sta ZP_I2C_DATA         ; Save to variable
         ldx #8                  ; We will do 8 bits.
 @loop:
-        lda #I2C_DATABIT        ; Init A for mask for TRB & TSB below.
-        trb I2C_DDR ; Release data line.  This is like i2c_data_up but saves 1 instruction.
+        lda I2C_DDR
+        and #(~I2C_DATABIT & $ff)
+        sta I2C_DDR
         asl ZP_I2C_DATA ; Get next bit to send and put it in the C flag.
         bcs @continue
-        tsb I2C_DDR ; If the bit was 0, pull data line down by making it an output.
+        ora #I2C_DATABIT
+        sta I2C_DDR
 @continue:
 
         i2c_clock_pulse         ; Pulse the clock
