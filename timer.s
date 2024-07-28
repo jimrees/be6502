@@ -34,13 +34,26 @@ timer_initialization:
         ;; Since interrupts are required to get us to the target,
         ;; we might as well use wai in the loop and reduce power
         ;; usage.
+        ;; This tries to be reasonably precise.  A delayticks of 1
+        ;; waits until the lsb of the counter passes the original value
 delayticks:
+        phx
+        ldx T1CH                ; snag the msb for later comparison
         clc
         adc tick_counter
 @delay_wait:
         wai
         cmp tick_counter
         bne @delay_wait
+
+@final_spin:
+        ;; now wait for EITHER T1CH <= X, or tick_counter > A
+        cpx T1CH
+        bcs @done
+        cmp tick_counter
+        bcs @final_spin
+@done:
+        plx
         rts
 
         ;; A is # seconds, up to 255.

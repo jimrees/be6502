@@ -32,6 +32,7 @@
         CALLER set_forced_rtsb
         CALLER delayseconds
         CALLER delayticks
+        CALLER lcd_read_ac
 .endmacro
 
 .endif

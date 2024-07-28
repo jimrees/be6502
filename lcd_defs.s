@@ -13,5 +13,6 @@
 .global lcd_print_hex8
 .global lcd_print_n_spaces
 .global lcd_print_string
+.global lcd_read_ac
 
 .endif

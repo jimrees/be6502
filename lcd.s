@@ -128,6 +128,37 @@ lcd_set_position:
         jsr lcd_instruction
         rts
 
+lcd_read_ac:
+        phx
+        lda #%00001111
+        trb DDRB
+        lda #(E|RS)
+        trb PORTB               ; CLEAR E & RS
+        lda #RW                 ; SET RW
+        tsb PORTB
+        lda #E
+        tsb PORTB               ; E UP
+        ldx PORTB               ; read high nibble
+        stx tmp0                ; save
+        trb PORTB               ; E DOWN
+        tsb PORTB               ; E UP
+        ldx PORTB
+        stx tmp1                ; save low nibble
+        trb PORTB               ; E DOWN - closes out transaction
+        plx
+        lda #%00001111
+        tsb DDRB                ; restore low pins to output
+        lda tmp0                ; shift high nibble up
+        asl
+        asl
+        asl
+        asl
+        sta tmp0
+        lda tmp1
+        and #$0f                ; clear out high bits of low nibble
+        ora tmp0                ; merge
+        rts
+
 lcd_initialization:
         ;; LCD owns PORTB 0..6, set them all to write
         lda #%01111111
