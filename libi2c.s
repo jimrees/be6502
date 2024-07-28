@@ -73,7 +73,7 @@ I2C_Start:
         i2c_clock_up
         i2c_data_down
         i2c_clock_down          ; this does it
-        i2c_data_up             ; this is just to get to a known state
+        ;; i2c_data_up             ; this is just to get to a known state
         rts
 
 ;------------------------------------------------------------------------------
@@ -81,10 +81,10 @@ I2C_Stop:
 ;------------------------------------------------------------------------------
 ; Destroys A, N, Z.  Preserves C,V
 ;------------------------------------------------------------------------------
-        i2c_data_down
+        i2c_data_down           ; yes, necessary
         i2c_clock_up
         i2c_data_up
-        i2c_clock_down
+        ;; i2c_clock_down - it only makes sense to leave clock released
         ;; i2c_data_up - would be superfluous
         rts
 

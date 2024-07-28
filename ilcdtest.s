@@ -70,12 +70,10 @@ start:
 
         SERIAL_PSTR initdone
 
-        jsr ilcd_home
-        jsr ilcd_read_ac
+        jsr ilcd_clear
+        jsr ilcd_readbusy
         jsr serial_print_A_in_hex
         jsr SERIAL_CRLF
-        lda #'*'
-        jsr CHROUT
         jsr SERIAL_CRLF
 
         lda #$0
