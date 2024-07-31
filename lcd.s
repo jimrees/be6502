@@ -4,6 +4,7 @@
 .include "via_defs.s"
 .include "lcd_defs.s"
 .include "bios_defs.s"
+.include "timer_defs.s"
 
 ;;; Display control bits - where they live on PORTB
 E  = %01000000
@@ -159,18 +160,6 @@ lcd_read_ac:
         ora tmp0                ; merge
         rts
 
-lcd_spin_5ms:
-        phx
-        lda #4
-        ldx #0
-@loop:
-        dex
-        bne @loop               ; 5*4*256 = ~5*1000 = 5ms
-        dec
-        bne @loop
-        plx
-        rts
-
 lcd_initialization:
         ;; LCD owns PORTB 0..6, set them all to write
         lda #%01111111
@@ -192,7 +181,8 @@ lcd_initialization:
         ;; Can't use delayticks because this is called before interrupts are enabled.
         ldy #3
 @loop8:
-        jsr lcd_spin_5ms
+        lda #1
+        jsr delayticks
         lda #%00000011
         DISP_SEND_INS_NIBBLE
         dey
@@ -200,7 +190,7 @@ lcd_initialization:
 
         ;; It is guaranteed we are in 8-bit mode now and lcd_wait works correctly in
         ;; either mode (non-dangling).
-        jsr lcd_spin_5ms
+        jsr lcd_wait
         lda #%00000010          ; go to 4-bit mode, with ONE E-cycle
         DISP_SEND_INS_NIBBLE
 

@@ -347,17 +347,11 @@ RESET:
         bne @clearzp
 
         jsr timer_initialization
-        jsr lcd_initialization
-
-        lda #'.'
-        jsr lcd_print_character
-
         jsr serial_initialization
 
-        lda #'.'
-        jsr lcd_print_character
+        cli                     ; allow lcd to use timer
 
-        jsr lcd_clear
+        jsr lcd_initialization
         lda #<WELCOME_MESSAGE
         ldy #>WELCOME_MESSAGE
         jsr lcd_print_string
