@@ -6,11 +6,13 @@
 .include "libi2c_defs.s"
 .include "libilcd_defs.s"
 .include "via_defs.s"
+.include "macros.s"
 
         TICK_COUNTER = 4
 
 .zeropage
 TMP_PTR:         .res 2
+SAVED_RET:        .res 2
 
 .macro SERIAL_PSTR name
         lda #< name
@@ -20,30 +22,9 @@ TMP_PTR:         .res 2
 
 .code
 start:
-        jsr lcd_clear
-        jsr lcd_read_ac
-        jsr serial_print_A_in_hex
-        jsr SERIAL_CRLF
-        lda #$40
-        jsr lcd_set_position
-        lda #'*'
-        jsr lcd_print_character
-        jsr lcd_read_ac
-        jsr serial_print_A_in_hex
-        jsr SERIAL_CRLF
-
         jsr I2C_Init
-        lda #$FF
-        sta LCD_I2C_ADDRESS     ; invalid address
-        jsr scan_for_device
-        bit LCD_I2C_ADDRESS
-        bpl @continue
-
-        SERIAL_PSTR nodeviceresponsed
-
-        brk                     ; fail if we found no device
-
-@continue:
+        lda #$3f
+        jsr ilcd_set_address
         jsr ilcd_init
         bcc @ok
 
@@ -70,6 +51,7 @@ start:
 
         SERIAL_PSTR initdone
 
+@mainloop:
         jsr ilcd_home
 
         lda #< hellostr
@@ -92,9 +74,11 @@ start:
         lda (TMP_PTR),y
         jsr ilcd_write_char
 
+.if 1
         jsr ilcd_read_ac
         jsr serial_print_A_in_hex
         jsr SERIAL_CRLF
+.endif
 
         iny
         cpy #8
@@ -111,39 +95,10 @@ start:
         jsr serial_print_A_in_hex
         jsr SERIAL_CRLF
 
-        lda #'2'
-        jsr lcd_print_character
+        jsr ANYCNTC
+        bne @mainloop
 
         brk                     ; return to WOZMON
-
-scan_for_device:
-        ;; loop through 256 bytes
-        ldx #127
-@scanloop:
-        phx
-        jsr I2C_Start           ; initiate
-        pla
-        sec                     ; read-mode?
-        jsr I2C_SendAddr
-        jsr I2C_ReadAck         ; result in C
-        jsr I2C_Stop
-
-        bcs @no_ack_asserted
-
-        txa
-        sta LCD_I2C_ADDRESS     ; save result
-        jsr serial_print_A_in_hex
-        lda #':'
-        jsr CHROUT
-        lda #' '
-        jsr CHROUT
-        SERIAL_PSTR success_message
-
-@no_ack_asserted:
-        jsr I2C_Clear
-        dex
-        bpl @scanloop
-        rts
 
 serial_print_value_in_decimal:
         ;; push digits onto the stack, then unwind to print
