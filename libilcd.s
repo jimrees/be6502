@@ -48,34 +48,39 @@ ilcd_set_address:
         sta LCD_I2C_ADDRESS_R
         rts
 
+.macro STROBE_A_THROUGH
+        jsr I2C_SendByte
+        eor #LCD_EN
+        jsr I2C_SendByte
+.endmacro
+
 ; ---------------------------------------------
 ; Initialise LCD Display
 ; ---------------------------------------------
 ilcd_init:
+        ;; Scenarios
+        ;; 1) lcd is in 8-bit mode.
+        ;; 2) 4-bit mode, no pending nibble.
+        ;; 3) 4-bit mode, pending nibble, where prior nibble was the
+        ;; command to switch to 8-bit mode.
+        ;; 4) 4-bit mode, pending nibble, prior nibble was not a
+        ;; command to switch to 8-bit mode
+
         LCD_I2C_Prefix
-        bcs @init_failed
+        lda #(%00110000|LCD_EN) ; set 8-bit mode
+        STROBE_A_THROUGH        ; 1) 8-bit, 2) half-way to 8-bit 3) 8-bit 4) 4-bit mode
+        eor #LCD_EN             ; restore original
+        STROBE_A_THROUGH        ; 1) 8-bit, 2) 8-bit, 3) 8-bit, 4) half-way to 8-bit
+        eor #LCD_EN             ; restore original
+        STROBE_A_THROUGH        ; All cases in 8-bit mode now.
 
-        lda #%11000100
-        ldx #6
-@fsetloop:
-        jsr I2C_SendByte
-        bcs @init_failed
-        eor #LCD_EN
-        dex
-        bne @fsetloop
-
-        lda #%00100100
-        jsr I2C_SendByte
-        bcs @init_failed
-
-        eor #LCD_EN
-        jsr I2C_SendByte
-        bcs @init_failed
+        lda #(%00100000|LCD_EN) ; switch to 4-bit mode
+        STROBE_A_THROUGH
         M_I2C_Stop
 
-        ;; Now 4-bit mode instructions
+        ;; Now full 4-bit mode instructions
         lda #%00101000
-        jsr ilcd_instruction ; Set to 2 lines, 8x5 font, backlight on
+        jsr ilcd_instruction ; 4-bit mode, 2 lines, 8x5 font, backlight on
 
         lda #%00001000
         jsr ilcd_instruction ; turn display off (but backlight on)
@@ -85,10 +90,10 @@ ilcd_init:
         jsr ilcd_wait
 
         lda #%00000110
-        jsr ilcd_instruction ; Increment cursor, do not shift display
+        jsr ilcd_instruction ; Increment ap on writes, do not shift display
 
         lda #%00001101
-        jsr ilcd_instruction ; Turn display on
+        jsr ilcd_instruction ; Turn display back on
 
         rts
 
@@ -125,18 +130,14 @@ ilcd_instruction:
         lda INST                ; fetch instruction
         and #$f0                ; clear low nibble
         ora #(LCD_EN|LCD_BT)    ; set EN & BT
-        jsr I2C_SendByte        ; send it
-        eor #LCD_EN             ; toggle EN
-        jsr I2C_SendByte        ; send it
+        STROBE_A_THROUGH
         lda INST                ; reload
         asl                     ; move low nibble up high
         asl
         asl
         asl
         ora #(LCD_EN|LCD_BT)    ; set EN
-        jsr I2C_SendByte        ; send
-        eor #LCD_EN             ; toggle EN
-        jsr I2C_SendByte        ; send with EN low
+        STROBE_A_THROUGH
         M_I2C_Stop
         rts
 
@@ -147,18 +148,14 @@ ilcd_instruction:
 .macro ILCD_WRITE_CHAR REGETCH
         and #$f0
         ora #(LCD_RS|LCD_EN|LCD_BT)
-        jsr I2C_SendByte
-        eor #LCD_EN             ; toggle EN
-        jsr I2C_SendByte
+        STROBE_A_THROUGH
         REGETCH
         asl
         asl
         asl
         asl
         ora #(LCD_RS|LCD_BT|LCD_EN)
-        jsr I2C_SendByte
-        eor #LCD_EN
-        jsr I2C_SendByte
+        STROBE_A_THROUGH
 .endmacro
 
 .macro INST2A
@@ -265,9 +262,7 @@ ilcd_readbusy:
         lda #RCMD
         jsr I2C_SendByte        ; E DOWN
         ora #LCD_EN
-        jsr I2C_SendByte        ; E UP
-        eor #LCD_EN
-        jsr I2C_SendByte        ; E DOWN to complete transaction
+        STROBE_A_THROUGH
         M_I2C_Stop
         pla
         asl
@@ -297,6 +292,17 @@ ilcd_create_char:
         cpy #8
         bcc @loop
         ply
+        rts
+
+ilcd_send_one_nibble:
+        ;; this is to deliberately put the device into the one-off state to
+        ;; test the initialization procedure:
+        lda #%00001000          ; turn display off
+        jsr ilcd_instruction
+        LCD_I2C_Prefix
+        lda #(%00100000|LCD_EN)
+        STROBE_A_THROUGH
+        M_I2C_Stop
         rts
 
 .rodata

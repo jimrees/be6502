@@ -51,6 +51,10 @@ start:
 
         SERIAL_PSTR initdone
 
+@wait_for_kbd:
+        jsr CHRIN
+        bcc @wait_for_kbd
+
 @mainloop:
         jsr ilcd_home
 
@@ -97,6 +101,10 @@ start:
 
         jsr ANYCNTC
         bne @mainloop
+
+        ;; deliberately send a 1/2-instruction to the LCD to force
+        ;; testing of initialization sequence.
+        jsr ilcd_send_one_nibble
 
         brk                     ; return to WOZMON
 
