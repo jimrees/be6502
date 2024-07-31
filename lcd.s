@@ -159,22 +159,52 @@ lcd_read_ac:
         ora tmp0                ; merge
         rts
 
+lcd_spin_5ms:
+        phx
+        lda #4
+        ldx #0
+@loop:
+        dex
+        bne @loop               ; 5*4*256 = ~5*1000 = 5ms
+        dec
+        bne @loop
+        plx
+        rts
+
 lcd_initialization:
         ;; LCD owns PORTB 0..6, set them all to write
         lda #%01111111
         tsb DDRB
 
         ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        ;; We might be in:
+        ;; 1) 8-bit mode
+        ;; 2) 4-bit mode with no dangling nibble
+        ;; 3) 4-bit mode, where the high half of a command to switch to 8-bit mode is pending
+        ;; 4) 4-bit mode, high half is %0000
+        ;; 5) 4-bit mode, dangling, high half is anything else
 
-        ;; Be clever - to get to 4-bit mode reliably, first go into
-        ;; 8-bit mode.  This command does so in both 4-bit parts
-        lda #%00110011          ; go to 8-bit mode
-        jsr lcd_instruction
+        ;; The last case requires the nibble to switch to 8-bit mode to be issued 3 times.
+        ;; All other cases get to 8-bit mode sooner and stay there.
 
+        ;; In case #4 the first command will become a HOME instruction, which might take
+        ;; 1500+ us.  We are waiting 5,000us - plenty of time to be on the safe side.
+        ;; Can't use delayticks because this is called before interrupts are enabled.
+        ldy #3
+@loop8:
+        jsr lcd_spin_5ms
+        lda #%00000011
+        DISP_SEND_INS_NIBBLE
+        dey
+        bne @loop8
+
+        ;; It is guaranteed we are in 8-bit mode now and lcd_wait works correctly in
+        ;; either mode (non-dangling).
+        jsr lcd_spin_5ms
         lda #%00000010          ; go to 4-bit mode, with ONE E-cycle
         DISP_SEND_INS_NIBBLE
 
-        ;; Now the LCD should be in 4-bit mode
+        ;; Now the LCD is in 4-bit mode
 
         lda #%00101000          ; 4-bit/2-line/5x8
         jsr lcd_instruction
