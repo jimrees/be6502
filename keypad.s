@@ -48,7 +48,7 @@ RS = %00010000
         cli
         sta \value
         sty \value + 1
-        jsr print_value_in_decimal
+        jsr lcd_print_value_in_decimal
         .endm
 
 ;;; The rom is mapped to start at $8000
@@ -152,7 +152,7 @@ pc_done:
 
 ;;; value must contain the number
 ;;; A,X,Y will all be trashed.
-print_value_in_decimal:
+lcd_print_value_in_decimal:
         lda #0                  ; push a null char on the stack
         pha
 

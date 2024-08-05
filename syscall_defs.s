@@ -6,6 +6,12 @@
         ;; a few zeropage locations too -- needed as parts of the api.
         value = $00               ; two bytes
         mod10 = $02               ; two bytes
+        tick_counter = $04        ; four bytes
+        fcharprint = $08          ; two byte pointer
+        tmp0 = $0A
+        tmp1 = $0B
+        tmp2 = $0C
+        tmp3 = $0D
 .global WOZSTART
 .global MONCOUT
 
@@ -29,6 +35,8 @@
         CALLER lcd_print_string
         CALLER divide_by_10
         CALLER print_value_in_decimal
+        CALLER lcd_print_value_in_decimal
+        CALLER serial_print_value_in_decimal
         CALLER set_forced_rtsb
         CALLER delayseconds
         CALLER delayticks

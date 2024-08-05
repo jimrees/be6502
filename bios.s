@@ -17,7 +17,13 @@ ALLSYSCALL .global
 START_OF_ZERO_INIT:
 loc_value:      .res 2          ; aka value
 loc_mod10:      .res 2          ; aka mod10
-tick_counter:   .res 4          ; used by the timer interrupt
+loc_tick_counter:.res 4         ; used by the timer interrupt
+loc_fcharprint: .res 2          ; used by decimalprint
+loc_tmp0:       .res 1
+loc_tmp1:       .res 1
+loc_tmp2:       .res 1
+loc_tmp3:       .res 1
+
 txDelay:        .res 2          ; tune-able value for ACIA output delay
 o_busy:         .res 1          ; serial interrupt managemetn [BUSY ...]
 iproducer_ptr:  .res 1
@@ -32,11 +38,14 @@ forced_rtsb:    .res 1 ; [FORCED ...]
 
 END_OF_ZERO_INIT:
 
-;;; Temporaries in the zeropage for anyone to use at their own risk
-tmp0:   .res 1
-tmp1:   .res 1
-tmp2:   .res 1
-tmp3:   .res 1
+.assert loc_value = value, error, "loc_value != value"
+.assert loc_mod10 = mod10, error, "loc_mod10 != mod10"
+.assert loc_tick_counter = tick_counter, error, "loc_tick_counter != tick_counter"
+.assert loc_fcharprint = fcharprint, error, "loc_fcharprint != fcharprint"
+.assert loc_tmp0 = tmp0, error, "loc_tmp0 != tmp0"
+.assert loc_tmp1 = tmp1, error, "loc_tmp1 != tmp1"
+.assert loc_tmp2 = tmp2, error, "loc_tmp2 != tmp2"
+.assert loc_tmp3 = tmp3, error, "loc_tmp3 != tmp3"
 
 .segment "BIOS_BUFFERS"
 ;;; As circular buffers indexed by an 8-bit value, these must be page-aligned

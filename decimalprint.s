@@ -67,8 +67,26 @@ print_value_in_decimal:
         bne @next_digit
         pla
 @unfold_print_loop:
-        jsr lcd_print_character
+        jsr @retpushed
         pla                     ; pop the next one
         bne @unfold_print_loop  ; if not-null, keep looping
 
         rts
+
+@retpushed: jmp (fcharprint)
+
+
+lcd_print_value_in_decimal:
+        lda #< lcd_print_character
+        sta fcharprint
+        lda #> lcd_print_character
+        sta fcharprint+1
+        jmp print_value_in_decimal
+
+.global CHROUT
+serial_print_value_in_decimal:
+        lda #< CHROUT
+        sta fcharprint
+        lda #> CHROUT
+        sta fcharprint+1
+        jmp print_value_in_decimal
