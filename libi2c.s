@@ -170,45 +170,49 @@ I2C_SendByte:
 ;;; Sends the byte in A
 ;;; Preserves A,X,Y - sets C
 ;;;------------------------------------------------------------------------------
-.if I2C_DATABIT = 1
         pha                     ; +3
-        eor #$ff                ; flip all bits, +2=5
-        sta ZP_I2C_DATA         ; stash +3=9
+        phx                     ; +3
+        sta ZP_I2C_DATA         ; stash +3
 
-        ;; this preserves other bits in DDRA, but only if no interrupt ever touches
-        ;; them.  If true atomicity of changes to DDRA is needed, one would need to
-        ;; either tsb for a 0 bit or trb for 1 bit meaning conditional branching.
+        ldx #8   ; +2 = 11
+        ;; The prior operation had to be an ACK/NAK or a start
+        ;; the known initial value of data is HIGH (released)
+@hiloop:
+        asl ZP_I2C_DATA         ; 2
+        bcc @switch_to_low      ; 3 if taken
+        i2c_clock_pulse         ; 14
+        dex                     ; 2
+        bne @hiloop             ; 3 if taken
+        jmp @finish             ; 3
 
-.macro SB_SINGLE_BIT
-        lda I2C_DDR             ; +4
-        lsr                     ; +2
-        asl ZP_I2C_DATA         ; +5
-        rol                     ; +2
-        sta I2C_DDR             ; +4 = 17
-        i2c_clock_pulse         ; +14 = 31
-.endmacro
-        DOTIMES SB_SINGLE_BIT,8 ; +8x31 = +248 = 257
-        jsr I2C_ReadAck         ; +42 = 299
-        pla                     ; +4 = 303
-.else
-        phx                     ; Save X +3
-        pha                     ; Save A +3
-        sta ZP_I2C_DATA         ; Save to variable +4
-        ldx #8                  ; We will do 8 bits. +2 = 12
-@loop:
-        i2c_data_up     ; +8
-        asl ZP_I2C_DATA ; Get next bit to send and put it in the C flag. +6
-        bcs @continue   ; +3
-        i2c_data_down   ; +8
-@continue:
-        i2c_clock_pulse         ; Pulse the clock +16
-        dex
-        bne @loop
-        jsr I2C_ReadAck         ; sets Carry
-        pla                     ; Restore A
-        plx                     ; Restore X
-.endif
-        rts                     ; +12 = 315 full circle!
+@loloop:
+        asl ZP_I2C_DATA         ; 2
+        bcs @switch_to_high     ; 3 if taken
+        i2c_clock_pulse         ; 14
+        dex                     ; 2
+        bne @loloop             ; 3 if taken
+        jmp @finish             ; 3
+
+@switch_to_low:
+        lda #I2C_DATABIT        ; 2
+        tsb I2C_DDR             ; 6
+        i2c_clock_pulse         ; 14
+        dex                     ; 2
+        bne @loloop             ; 3 if taken
+        jmp @finish             ; 3
+
+@switch_to_high:
+        lda #I2C_DATABIT        ; 2
+        trb I2C_DDR             ; 6
+        i2c_clock_pulse         ; 14
+        dex                     ; 2
+        bne @hiloop             ; 3 if taken
+
+@finish:
+        jsr I2C_ReadAck         ; +42
+        plx                     ; +4
+        pla                     ; +4
+        rts                     ;
 
 ;;;------------------------------------------------------------------------------
 I2C_ReadByte:

@@ -488,6 +488,9 @@ init:
         lda #$50
         jsr both_set_position
 
+        lda #50
+        jsr delayticks
+
         jsr dht_readRawData
         bpl @no_timeout_error
         jmp @timeout_error
@@ -495,15 +498,15 @@ init:
         php                     ; save status
 
         lda #2                  ; thermometer
-        jsr print_char_to_both
+        jsr print_char_to_lcds
         lda #' '
-        jsr print_char_to_both
+        jsr print_char_to_lcds
         ;; our data should be there:
         lda integral_temp
         bpl @not_negative
         and #$7f
         lda #'-'
-        jsr print_char_to_both
+        jsr print_char_to_all
 
 @not_negative:
 
@@ -517,14 +520,14 @@ init:
         pha                     ; save it
         jsr both_value_in_decimal ; prints what's stored in value
         lda #'.'
-        jsr print_char_to_both
+        jsr print_char_to_all
         pla                     ; recover fraction
         clc
         adc #'0'                ; and just print it since we know it can only be 0..9
-        jsr print_char_to_both
+        jsr print_char_to_all
 
         lda #' '
-        jsr print_char_to_both
+        jsr print_char_to_all
 
         lda integral_rh
         sta value+1
@@ -536,25 +539,25 @@ init:
         jsr both_value_in_decimal
 
         lda #'.'
-        jsr print_char_to_both
+        jsr print_char_to_all
         pla
         clc
         adc #'0'
-        jsr print_char_to_both
+        jsr print_char_to_all
         lda #' '
-        jsr print_char_to_both
+        jsr print_char_to_all
 
         plp                     ; restore status from dht_readRawData call
         beq @show_loop_char     ; if Z is set, then all is well.
 
         lda #'E'                ; Report checksum failure
-        jsr print_char_to_both
+        jsr print_char_to_all
         lda sensor_checksum
         sta value
         stz value+1
         jsr both_value_in_decimal
         lda #' '
-        jsr print_char_to_both
+        jsr print_char_to_all
         jmp @show_loop_char
 
 @timeout_error:
@@ -569,10 +572,12 @@ init:
         tax
 
         lda loopchars,x
-        jsr print_char_to_both
+        jsr print_char_to_lcds
+        lda serial_loopchars,x
+        jsr CHROUT
 
         lda #1                  ; the hash mark
-        jsr print_char_to_both
+        jsr print_char_to_lcds
 
         ;; Now perform the shift from off-screen onto screen
         ldy #16
@@ -583,9 +588,6 @@ init:
         dey
         bne @ipadloop
 
-        lda serial_loopchars,x
-        jsr CHROUT
-
         jsr report_uptime
 
         jsr ANYCNTC
@@ -593,7 +595,7 @@ init:
         jmp @loop
 
 @quit_program:
-        jmp WOZSTART
+        brk
 
 
 ;;; value must contain the number
@@ -615,21 +617,23 @@ both_value_in_decimal:
         bne @next_digit
         pla
 @unfold_print_loop:
-        jsr print_char_to_both
+        jsr print_char_to_all
         pla                     ; pop the next one
         bne @unfold_print_loop  ; if not-null, keep looping
 
         rts
 
-print_char_to_both:
+print_char_to_all:
         pha
+        jsr CHROUT
+        pla
+        jmp print_char_to_lcds
+
+print_char_to_lcds:
         pha
         jsr lcd_print_character
         pla
-        jsr ilcd_write_char
-        pla
-        jsr CHROUT
-        rts
+        jmp ilcd_write_char
 
 lcd_create_char:
         asl                     ; multiply by 8
@@ -650,30 +654,30 @@ lcd_create_char:
 
 .rodata
 backslash:
-.byte %00000000
-.byte %00010000
-.byte %00001000
-.byte %00000100
-.byte %00000010
-.byte %00000001
-.byte %00000000
-.byte %00000000
+.byte %00000
+.byte %10000
+.byte %01000
+.byte %00100
+.byte %00010
+.byte %00001
+.byte %00000
+.byte %00000
 checks:
-.byte %00010101
-.byte %00001010
-.byte %00010101
-.byte %00001010
-.byte %00010101
-.byte %00001010
-.byte %00010101
-.byte %00001010
+.byte %10101
+.byte %01010
+.byte %10101
+.byte %01010
+.byte %10101
+.byte %01010
+.byte %10101
+.byte %01010
 thermometer:
-.byte %00000100
-.byte %00001010
-.byte %00001010
-.byte %00001110
-.byte %00011111
-.byte %00011111
-.byte %00001110
-.byte %00000100
+.byte %00100
+.byte %01010
+.byte %01010
+.byte %01110
+.byte %11111
+.byte %11111
+.byte %01110
+.byte %00100
 .rodata

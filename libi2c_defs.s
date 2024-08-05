@@ -20,6 +20,11 @@ I2C_PORT        = PORTA
         sta I2C_DDR                ; +4=10
         ora #I2C_CLOCKBIT          ; +2=12
         sta I2C_DDR                ; +4=16
+
+        ;; After start, release data high so SENDBYTE can assume that.
+        ;; Every ACK/NAK puts data high already, so this is sensible.
+        and #(~I2C_DATABIT & $ff) ; data up +2=18, data up
+        sta I2C_DDR               ; +4=22
 .endmacro
 
 ;;; Issue an I2C Stop

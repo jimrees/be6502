@@ -260,7 +260,9 @@ ilcd_wait:
         asl
         asl
         asl
-        bmi @spin
+        bpl @wreturn
+        jmp @spin
+@wreturn:
         rts
 
         ;; used to set position #$40 is useful for going to start of second line
