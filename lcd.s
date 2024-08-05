@@ -178,7 +178,8 @@ lcd_initialization:
 
         ;; In case #4 the first command will become a HOME instruction, which might take
         ;; 1500+ us.  We are waiting 5,000us - plenty of time to be on the safe side.
-        ;; Can't use delayticks because this is called before interrupts are enabled.
+        ;; Be sure timer_initialization has been called and that interrupts have been
+        ;; enabled before calling this so that delayticks works.
         ldy #3
 @loop8:
         lda #1

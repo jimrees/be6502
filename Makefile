@@ -25,7 +25,7 @@ bios.bin: bios.cfg bios.o wozmon.o msbasic/tmp/msbasic.o lcd.o acia.o timer.o de
 
 christmas.o64: christmas.o prog.cfg
 printchars.o64: printchars.o prog.cfg
-sensor.o64: sensor.o via.o prog.cfg
+sensor.o64: sensor.o via.o libi2c.o libilcd.o prog.cfg
 ilcdtest.o64: ilcdtest.o libi2c.o libilcd.o via.o prog.cfg
 i2cscan.o64: i2cscan.o libi2c.o via.o prog.cfg
 timeop.o64: timeop.o via.o prog.cfg

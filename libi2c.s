@@ -1,3 +1,5 @@
+;;; Compliments from whoever I snarfed this code from on the internet.
+;;; I have trimmed it down a lot to save cycles.
 .setcpu "65C02"
 .feature string_escapes on
 .include "via_defs.s"
@@ -9,39 +11,39 @@ ZP_I2C_DATA:    .res 1
 
 .code
 
-;------------------------------------------------------------------------------
+;;;------------------------------------------------------------------------------
 .macro i2c_data_up
-;------------------------------------------------------------------------------
-; Destroys A
-;------------------------------------------------------------------------------
+;;;------------------------------------------------------------------------------
+;;; Destroys A
+;;;------------------------------------------------------------------------------
         lda   #I2C_DATABIT  ; Clear data bit of the DDR
         trb   I2C_DDR       ; to make bit an input and let it float up.
 .endmacro
 
-;------------------------------------------------------------------------------
+;;;------------------------------------------------------------------------------
 .macro i2c_data_down
-;------------------------------------------------------------------------------
-; Destroys A, 8 cycles
-;------------------------------------------------------------------------------
+;;;------------------------------------------------------------------------------
+;;; Destroys A, 8 cycles
+;;;------------------------------------------------------------------------------
         lda   #I2C_DATABIT  ; Set data bit of the DDR
         tsb   I2C_DDR       ; to make bit an output and pull it down.
 .endmacro
 
-;------------------------------------------------------------------------------
+;;;------------------------------------------------------------------------------
 .macro i2c_clock_up
-;------------------------------------------------------------------------------
-; Destroys A, 8 cycles
-;------------------------------------------------------------------------------
+;;;------------------------------------------------------------------------------
+;;; Destroys A, 8 cycles
+;;;------------------------------------------------------------------------------
         lda   #I2C_CLOCKBIT     ; 2 cycles
         trb   I2C_DDR           ; 6 cycles
 .endmacro
 
 
-;------------------------------------------------------------------------------
+;;;------------------------------------------------------------------------------
 .macro i2c_clock_down
-;------------------------------------------------------------------------------
-; Destroys A, 8 cycles
-;------------------------------------------------------------------------------
+;;;------------------------------------------------------------------------------
+;;; Destroys A, 8 cycles
+;;;------------------------------------------------------------------------------
         lda   #I2C_CLOCKBIT
         tsb   I2C_DDR
 .endmacro
@@ -49,7 +51,7 @@ ZP_I2C_DATA:    .res 1
 ;------------------------------------------------------------------------------
     .macro i2c_clock_pulse
 ;------------------------------------------------------------------------------
-; Destroys A
+;;; Destroys A
 ;------------------------------------------------------------------------------
 .if 0
         ;; 16 cycle version - same as the third here below
@@ -70,59 +72,9 @@ ZP_I2C_DATA:    .res 1
 .endmacro
 
 ;------------------------------------------------------------------------------
-I2C_Start:
-;------------------------------------------------------------------------------
-; Destroys A, N, Z - preserves C,V
-;------------------------------------------------------------------------------
-.if 0
-        ;; 32 cycles
-        i2c_data_up
-        i2c_clock_up
-        i2c_data_down
-        i2c_clock_down
-.else
-        ;; this saves 4 cycles.
-        lda I2C_DDR                ; 4
-        and #(~I2C_DATABIT & $ff)  ; +2=6
-        sta I2C_DDR                ; +4=10
-        and #(~I2C_CLOCKBIT & $ff) ; +2=12
-        sta I2C_DDR                ; +4=16
-        ora #I2C_DATABIT           ; +2=18
-        sta I2C_DDR                ; +4=22
-        ora #I2C_CLOCKBIT          ; +2=24
-        sta I2C_DDR                ; +4=28
-.endif
-        rts
-
-;------------------------------------------------------------------------------
-I2C_Stop:
-;------------------------------------------------------------------------------
-; Destroys A, N, Z.  Preserves C,V
-;------------------------------------------------------------------------------
-.if 0
-        ;; 24 cycles
-        i2c_data_down
-        i2c_clock_up
-        i2c_data_up
-.else
-        ;; Saves 2 cycles
-        lda I2C_DDR             ; 4
-
-        ora #I2C_DATABIT        ; data down +2=6
-        sta I2C_DDR             ; +4=10
-
-        and #(~I2C_CLOCKBIT & $ff) ; +2=12
-        sta I2C_DDR                ; clock up +4=16
-
-        and #(~I2C_DATABIT & $ff) ; data up +2=18
-        sta I2C_DDR               ; +4=22
-.endif
-        rts
-
-;------------------------------------------------------------------------------
 I2C_SendAck:
 ;------------------------------------------------------------------------------
-; Destroys A
+;;; Destroys A
 ;------------------------------------------------------------------------------
         i2c_data_down       ; Acknowledge.  The ACK bit in I2C is the 9th bit of a "byte".
         i2c_clock_pulse     ; Trigger the clock
@@ -132,7 +84,7 @@ I2C_SendAck:
 ;------------------------------------------------------------------------------
 I2C_SendNak:
 ;------------------------------------------------------------------------------
-; Destroys A
+;;; Destroys A
 ;------------------------------------------------------------------------------
 .if 0
         i2c_data_up         ; Acknowledging consists of pulling it down. +8
@@ -153,8 +105,8 @@ I2C_SendNak:
 ;------------------------------------------------------------------------------
 I2C_ReadAck:
 ;------------------------------------------------------------------------------
-; Ack in carry flag (clear means ack, set means nak)
-; Destroys A
+;;; Ack in carry flag (clear means ack, set means nak)
+;;; Destroys A
 ;------------------------------------------------------------------------------
         i2c_data_up             ; +8
         i2c_clock_up            ; +8
@@ -171,31 +123,34 @@ I2C_ReadAck:
         sec                 ; Set carry if not zero +2
 @skip:
 .endif
-        i2c_clock_down      ; Bring the clock down
+        i2c_clock_down      ; Bring the clock down, +8, 30 + 12
         rts
 
 
-;------------------------------------------------------------------------------
+;;;------------------------------------------------------------------------------
 I2C_Init:
-;------------------------------------------------------------------------------
-; Destroys A
-;------------------------------------------------------------------------------
-        lda #(I2C_CLOCKBIT | I2C_DATABIT)
-        tsb I2C_DDR
-        trb I2C_PORT
-        ;; The above could potentially start a frame, so run clear to be safe
-        jmp I2C_Clear
+;;;------------------------------------------------------------------------------
+;;; This will correctly preserve ORA/ORB for other devices, but it will also
+;;; drive pins that perhaps should not be driven - but only for 10 cycles.
+;;; The BIOS could use a facility to manage ORA/ORB values.
+;;;------------------------------------------------------------------------------
+        ;; power-on for the 6522 is zero for ORA and DDR.  We should be fine.
+        ;; But since this code might be called in cases other than hw reset...
+        lda #(I2C_CLOCKBIT|I2C_DATABIT)
+        trb I2C_DDR             ; release and GO HIGH
+        jsr I2C_Clear
+        rts
 
-;------------------------------------------------------------------------------
+;;;------------------------------------------------------------------------------
 I2C_Clear:
-;------------------------------------------------------------------------------
-; This clears any unwanted transaction that might be in progress, by giving
-; enough clock pulses to finish a byte and not acknowledging it.
-; Destroys  A
-;------------------------------------------------------------------------------
+;;;------------------------------------------------------------------------------
+;;; This clears any unwanted transaction that might be in progress, by giving
+;;; enough clock pulses to finish a byte and not acknowledging it.
+;;; Destroys  A
+;;;------------------------------------------------------------------------------
         phx                     ; Save X
-        jsr I2C_Start
-        jsr I2C_Stop
+        M_I2C_Start
+        M_I2C_Stop
         i2c_data_up ; Keep data line released so we don't ACK any byte sent by a device.
         ldx #9 ; Loop 9x to send 9 clock pulses to finish any byte a device might send.
         lda #I2C_CLOCKBIT
@@ -205,19 +160,20 @@ I2C_Clear:
         dex
         bne @do
         plx                     ; Restore X
-        jsr I2C_Start
-        jmp I2C_Stop            ; (JSR, RTS)
+        M_I2C_Start
+        M_I2C_Stop
+        rts
 
-;------------------------------------------------------------------------------
+;;;------------------------------------------------------------------------------
 I2C_SendByte:
-;------------------------------------------------------------------------------
-; Sends the byte in A
-; Preserves A,X,Y - sets C
-;------------------------------------------------------------------------------
+;;;------------------------------------------------------------------------------
+;;; Sends the byte in A
+;;; Preserves A,X,Y - sets C
+;;;------------------------------------------------------------------------------
 .if I2C_DATABIT = 1
-        pha
-        eor #$ff                ; flip all bits
-        sta ZP_I2C_DATA         ; stash
+        pha                     ; +3
+        eor #$ff                ; flip all bits, +2=5
+        sta ZP_I2C_DATA         ; stash +3=9
 
         ;; this preserves other bits in DDRA, but only if no interrupt ever touches
         ;; them.  If true atomicity of changes to DDRA is needed, one would need to
@@ -228,12 +184,12 @@ I2C_SendByte:
         lsr                     ; +2
         asl ZP_I2C_DATA         ; +5
         rol                     ; +2
-        sta I2C_DDR             ; +4 = 18
-        i2c_clock_pulse         ; +14 = 32
+        sta I2C_DDR             ; +4 = 17
+        i2c_clock_pulse         ; +14 = 31
 .endmacro
-        DOTIMES SB_SINGLE_BIT,8
-        jsr I2C_ReadAck
-        pla
+        DOTIMES SB_SINGLE_BIT,8 ; +8x31 = +248 = 257
+        jsr I2C_ReadAck         ; +42 = 299
+        pla                     ; +4 = 303
 .else
         phx                     ; Save X +3
         pha                     ; Save A +3
@@ -252,13 +208,13 @@ I2C_SendByte:
         pla                     ; Restore A
         plx                     ; Restore X
 .endif
-        rts
+        rts                     ; +12 = 315 full circle!
 
-;------------------------------------------------------------------------------
+;;;------------------------------------------------------------------------------
 I2C_ReadByte:
-;------------------------------------------------------------------------------
-; Start with clock low.  Ends with byte in A.  Do ACK separately.
-;------------------------------------------------------------------------------
+;;;------------------------------------------------------------------------------
+;;; Start with clock low.  Ends with byte in A.  Do ACK separately.
+;;;------------------------------------------------------------------------------
         ;; data must already be up
         ;; i2c_data_up             ; Make sure we're not holding the data line down.
         lda #I2C_CLOCKBIT       ; Load the clock bit in for initial loop
@@ -279,12 +235,12 @@ skip:   rol ZP_I2C_DATA
         lda ZP_I2C_DATA         ; Load A from local
         rts
 
-;------------------------------------------------------------------------------
+;;;------------------------------------------------------------------------------
 I2C_ReadHi4:
-;------------------------------------------------------------------------------
+;;;------------------------------------------------------------------------------
 ;;; Start with clock low.  Ends with byte in A.  Do ACK separately.
 ;;; Trashes the X register too.
-;------------------------------------------------------------------------------
+;;;------------------------------------------------------------------------------
         ;; the thing prior to ReadHi4 was either a previous NAK or a previous
         ;; ack by the slave of the address.   In both cases, data line must be
         ;; up - so there's no need to do it again.
@@ -333,11 +289,11 @@ skip:   rol ZP_I2C_DATA
         lda ZP_I2C_DATA            ; Load A from local
         rts
 
-;------------------------------------------------------------------------------
+;;;------------------------------------------------------------------------------
 I2C_SendAddr:
-;------------------------------------------------------------------------------
-; Address in A, carry flag contains read/write flag (read = 1, write 0)
-; Return ack in Carry
-;------------------------------------------------------------------------------
+;;;------------------------------------------------------------------------------
+;;; Address in A, carry flag contains read/write flag (read = 1, write 0)
+;;; Return ack in Carry
+;;;------------------------------------------------------------------------------
         rol A                   ; Rotates address 1 bit and puts read/write flag in A
         jmp I2C_SendByte        ; Sends address and returns
