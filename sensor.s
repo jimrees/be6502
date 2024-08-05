@@ -22,8 +22,12 @@
 .include "timer_defs.s"
 .include "lcd_defs.s"
 .include "syscall_defs.s"
-
 ALLSYSCALL .global
+
+.include "libi2c_defs.s"
+.include "libilcd_defs.s"
+
+        lcd_instruction = $a162
 
 ;;; For simplicity, this is a full page.  More complex code could
 ;;; reduce it to 4 slots probably, if needed.  If reduced, it could
@@ -39,6 +43,7 @@ decimal_rh:       .res 1
 integral_temp:    .res 1
 decimal_temp:     .res 1
 sensor_checksum:  .res 1
+correct_checksum: .res 1
 timeout_target:   .res 1
 loop_counter:     .res 1
 divisor:          .res 1
@@ -58,19 +63,74 @@ start:
 premessage:     .asciiz "Good Morning"
 message:        .asciiz "Temperature & RH"
 timeout_message: .asciiz "TIMEOUT "
-loopchars:           .byte "|/-",$a4
+loopchars:           .byte "|/-",$0
 serial_loopchars:      .byte "|/-\\"
 uptime:         .asciiz " Uptime: "
 days:          .asciiz " days, "
 hours:         .asciiz " hours, "
 minutes:         .asciiz " minutes, and "
 seconds:         .asciiz " seconds.\r\n"
+press_key_to_continue:  .asciiz "Press any key to continue..."
 
-.macro PSTR STR
+.macro PAUSE_FOR_KEYPRESS
+.local @spin, @continue
+        SERIAL_PSTR press_key_to_continue
+@spin:  jsr BYTEIN
+        bcc @spin
+        cmp #$03
+        bne @continue
+        brk
+@continue:
+        jsr SERIAL_CRLF
+.endmacro
+.macro SERIAL_PSTR STR
         lda #<STR
         ldy #>STR
         jsr STROUT
 .endmacro
+.macro LCD_PSTR STR
+        lda #<STR
+        ldy #>STR
+        jsr lcd_print_string
+.endmacro
+.macro ILCD_PSTR STR
+        lda #<STR
+        ldy #>STR
+        jsr ilcd_print_string
+.endmacro
+.macro BOTH_PSTR STR
+        LCD_PSTR STR
+        ILCD_PSTR STR
+.endmacro
+
+both_clear:
+        jsr lcd_clear
+        jmp ilcd_clear
+both_set_position:
+        pha
+        jsr lcd_set_position
+        pla
+        jmp ilcd_set_position
+both_shift_left:
+        lda #%00011000
+        jsr lcd_instruction
+        jmp ilcd_shift_left
+
+both_cursor_right:
+        lda #%00010100
+        jsr lcd_instruction
+        jmp ilcd_cursor_right
+
+both_cursor_left:
+        lda #%00010000
+        jsr lcd_instruction
+        jmp ilcd_cursor_left
+
+both_create_char:
+        pha
+        jsr lcd_create_char
+        pla
+        jmp ilcd_create_char
 
 divide_by_divisor:
         pha
@@ -134,30 +194,6 @@ divide_by_divisor:
         pla
         rts
 
-tick_counter = 4
-
-serial_print_value_in_decimal:
-        ;; push digits onto the stack, then unwind to print
-        ;; the in the right order.
-        lda #0                  ; push a null char on the stack
-        pha
-@next_digit:
-        jsr divide_by_10
-        lda mod10
-        clc
-        adc #'0'
-        pha
-        ;; If any part of the quotient is > 0, go again.
-        lda value
-        ora value+1
-        bne @next_digit
-        pla
-@unfold_print_loop:
-        jsr CHROUT
-        pla                     ; pop the next one
-        bne @unfold_print_loop  ; if not-null, keep looping
-        rts
-
 report_uptime:
         sei
         lda tick_counter
@@ -193,27 +229,27 @@ report_uptime:
         pha                  ; push hours
 
         ;; value contains days
-        PSTR uptime
+        SERIAL_PSTR uptime
         jsr serial_print_value_in_decimal
-        PSTR days
+        SERIAL_PSTR days
 
         pla
         sta value
         stz value+1
         jsr serial_print_value_in_decimal
-        PSTR hours
+        SERIAL_PSTR hours
 
         pla                     ; minutes
         sta value
         stz value+1
         jsr serial_print_value_in_decimal
-        PSTR minutes
+        SERIAL_PSTR minutes
 
         pla
         sta value
         stz value+1
         jsr serial_print_value_in_decimal
-        PSTR seconds
+        SERIAL_PSTR seconds
         rts
 
 ;;;
@@ -236,21 +272,21 @@ dht_readRawData:
         sta sensorbytes+3
         sta sensorbytes+4
 
+        lda #80
+        jsr set_forced_rtsb
+
         ;; Initiate the request with a long down pulse (>= 18ms)
         lda #DHT_MASK         ; pin.mode = OUTPUT
         tsb DDRA                ; so ONLY that pin is outout
-        trb PORTA               ; assert LOW (1 downedge)
 
-        lda #((20 * TIMER_FREQUENCY) / 1000) + 1
+        ;; we only need 1ms delay, but here's 10ms
+        lda #1
         jsr delayticks
 
         ;; first downedge in 40us.
         ;; next after that in 160us
         ;; then 80-120 x 40 after that 200 + 4800 = 5000us total max
         ;; set a target time (4-byte?) after the release and sample as we go:
-
-        lda #80
-        jsr set_forced_rtsb
 
         lda #$01
         sta IFR                 ; clear the current CA2 condition
@@ -332,11 +368,13 @@ dht_readRawData:
         inx
         bmi @byteloop           ; while still negative, keep looping
 
+.if 0                           ; Eliminated when I2C took pin 0 over
         ;; testing - if jumper is set high, it flips bit 0 of the checksum
         lda PORTA
         and #1
         eor sensor_checksum
         sta sensor_checksum
+.endif
 
         ;; confirm checksum
         lda sensorbytes
@@ -346,6 +384,7 @@ dht_readRawData:
         adc sensorbytes+2
         clc
         adc sensorbytes+3
+        sta correct_checksum
         cmp sensor_checksum
         bne @ck_bad_checksum
         lda #0
@@ -364,8 +403,33 @@ dht_readRawData:
 ;;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 init:
-        ;; jsr timer_initialization - not needed.  bios already has done this
-        ;; jsr lcd_initialization - not needed
+        ;; zero out ORA while DDRA is also zero.
+        jsr I2C_Init
+
+        lda #$3f
+        jsr ilcd_set_address
+        jsr ilcd_init
+
+        lda #< backslash
+        sta value
+        lda #> backslash
+        sta value+1
+        lda #0
+        jsr both_create_char
+
+        lda #< checks
+        sta value
+        lda #> checks
+        sta value+1
+        lda #1
+        jsr both_create_char
+
+        lda #< thermometer
+        sta value
+        lda #> thermometer
+        sta value+1
+        lda #2
+        jsr both_create_char
 
         ;; Also trigger CA2 downedges, in independent mode
         stz loop_counter
@@ -381,32 +445,59 @@ init:
         sta PCR
         cli
 
-        jsr lcd_clear
-        lda #<premessage
-        ldy #>premessage
-        jsr lcd_print_string
-
-        PSTR premessage
-        jsr SERIAL_CRLF
-
-        PSTR message
-        jsr SERIAL_CRLF
+        jsr both_clear
+        BOTH_PSTR premessage
 
 @loop:
-        lda #5
-        jsr delayseconds
+        lda #%00001110          ; display on, cursor on, blink off
+        jsr lcd_instruction
 
-        jsr lcd_clear
-        lda #<message
-        ldy #>message
-        jsr lcd_print_string
-        lda #40
-        jsr lcd_set_position
+        lda #$50
+        jsr both_set_position
+
+        ;; move cursor right 15 times
+        ldx #7
+@currightloop:
+        phx
+        jsr both_cursor_right
+        jsr both_cursor_right
+        lda #28
+        jsr delayticks
+        plx
+        dex
+        bne @currightloop
+
+        ldx #7
+@curleftloop:
+        phx
+        jsr both_cursor_left
+        jsr both_cursor_left
+        lda #28
+        jsr delayticks
+        plx
+        dex
+        bne @curleftloop
+
+        jsr both_clear
+
+        lda #$10
+        jsr both_set_position
+
+        BOTH_PSTR message
+
+        lda #$50
+        jsr both_set_position
 
         jsr dht_readRawData
-        bmi @timeout_error
+        bpl @no_timeout_error
+        jmp @timeout_error
+@no_timeout_error:
         php                     ; save status
 
+        lda #2                  ; thermometer
+        jsr print_char_to_both
+        lda #' '
+        jsr print_char_to_both
         ;; our data should be there:
         lda integral_temp
         bpl @not_negative
@@ -467,10 +558,8 @@ init:
         jmp @show_loop_char
 
 @timeout_error:
-        lda #<timeout_message
-        ldy #>timeout_message
-        jsr lcd_print_string
-        PSTR timeout_message
+        BOTH_PSTR timeout_message
+        SERIAL_PSTR timeout_message
 
 @show_loop_char:
         lda loop_counter
@@ -480,7 +569,19 @@ init:
         tax
 
         lda loopchars,x
-        jsr lcd_print_character
+        jsr print_char_to_both
+
+        lda #1                  ; the hash mark
+        jsr print_char_to_both
+
+        ;; Now perform the shift from off-screen onto screen
+        ldy #16
+@ipadloop:
+        jsr both_shift_left
+        lda #4
+        jsr delayticks
+        dey
+        bne @ipadloop
 
         lda serial_loopchars,x
         jsr CHROUT
@@ -514,10 +615,7 @@ both_value_in_decimal:
         bne @next_digit
         pla
 @unfold_print_loop:
-        pha
-        jsr CHROUT
-        pla
-        jsr lcd_print_character
+        jsr print_char_to_both
         pla                     ; pop the next one
         bne @unfold_print_loop  ; if not-null, keep looping
 
@@ -525,7 +623,57 @@ both_value_in_decimal:
 
 print_char_to_both:
         pha
+        pha
         jsr lcd_print_character
+        pla
+        jsr ilcd_write_char
         pla
         jsr CHROUT
         rts
+
+lcd_create_char:
+        asl                     ; multiply by 8
+        asl
+        asl
+        ora #$40                ; LCD_SETCGRAMADDR
+        jsr lcd_instruction
+        phy
+        ldy #0
+@loop:
+        lda (value),y
+        jsr lcd_print_character
+        iny
+        cpy #8
+        bcc @loop
+        ply
+        rts
+
+.rodata
+backslash:
+.byte %00000000
+.byte %00010000
+.byte %00001000
+.byte %00000100
+.byte %00000010
+.byte %00000001
+.byte %00000000
+.byte %00000000
+checks:
+.byte %00010101
+.byte %00001010
+.byte %00010101
+.byte %00001010
+.byte %00010101
+.byte %00001010
+.byte %00010101
+.byte %00001010
+thermometer:
+.byte %00000100
+.byte %00001010
+.byte %00001010
+.byte %00001110
+.byte %00011111
+.byte %00011111
+.byte %00001110
+.byte %00000100
+.rodata

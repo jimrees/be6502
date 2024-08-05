@@ -152,49 +152,12 @@ start:
         inc NEXT_CORRUPT
         brk                     ; return to WOZMON
 
-serial_print_value_in_decimal:
-        ;; push digits onto the stack, then unwind to print
-        ;; the in the right order.
-        lda #0                  ; push a null char on the stack
-        pha
-@next_digit:
-        jsr divide_by_10
-        lda mod10
-        clc
-        adc #'0'
-        pha
-        ;; If any part of the quotient is > 0, go again.
-        lda value
-        ora value+1
-        bne @next_digit
-        pla
-@unfold_print_loop:
-        jsr CHROUT
-        pla                     ; pop the next one
-        bne @unfold_print_loop  ; if not-null, keep looping
-        rts
-
-lcd_print_value_in_decimal:
-        ;; push digits onto the stack, then unwind to print
-        ;; the in the right order.
-        lda #0                  ; push a null char on the stack
-        pha
-@next_digit:
-        jsr divide_by_10
-        lda mod10
-        clc
-        adc #'0'
-        pha
-        ;; If any part of the quotient is > 0, go again.
-        lda value
-        ora value+1
-        bne @next_digit
-        pla
-@unfold_print_loop:
-        jsr ilcd_write_char
-        pla                     ; pop the next one
-        bne @unfold_print_loop  ; if not-null, keep looping
-        rts
+ilcd_print_value_in_decimal:
+        lda #< ilcd_write_char
+        sta fcharprint
+        lda #> ilcd_write_char
+        sta fcharprint+1
+        jmp print_value_in_decimal
 
 serial_print_hex_nibble:
         cmp #10

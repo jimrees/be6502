@@ -1,5 +1,18 @@
-.global ilcd_init, ilcd_cursor_off, ilcd_print_string
-.global ilcd_write_char, ilcd_home, ilcd_clear, ilcd_read_ac
-.global ilcd_set_position, ilcd_readbusy, ilcd_create_char
-.global ilcd_set_address, ilcd_send_one_nibble
-.globalzp LCD_CC_ADDRESS        ; 2 bytes
+.global ilcd_init
+.global ilcd_cursor_off
+.global ilcd_print_string
+.global ilcd_write_char
+.global ilcd_home
+.global ilcd_clear
+.global ilcd_read_ac
+.global ilcd_set_position
+.global ilcd_shift_left
+.global ilcd_shift_right
+.global ilcd_cursor_right
+.global ilcd_cursor_left
+.global ilcd_readbusy
+.global ilcd_create_char
+.global ilcd_set_address
+.global ilcd_corrupt_state
+.global ilcd_instruction
+.global ilcd_wait

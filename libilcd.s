@@ -12,30 +12,33 @@ LCD_RW = %00000010
 LCD_EN = %00000100
 LCD_BT = %00001000
 
-.zeropage
 ;;; Source address pointer for strings & custom characters
-LCD_CC_ADDRESS:
-LCD_STRPTR:               .res 2
+LCD_STRPTR = value
+INST = mod10
 
-;;; A place to stash the current instruction/char while writing the 4-bit halves.
-INST:                     .res 1
-
+.zeropage
 LCD_I2C_ADDRESS_W:        .res 1
 LCD_I2C_ADDRESS_R:        .res 1
 
 .code
 
-
-.macro LCD_I2C_Prefix
-        M_I2C_Start
-        lda LCD_I2C_ADDRESS_W
-        jsr I2C_SendByte
+.macro W2A
+        lda LCD_I2C_ADDRESS_W   ; +3
+.endmacro
+.macro R2A
+        lda LCD_I2C_ADDRESS_R   ; +3
 .endmacro
 
-.macro LCD_I2C_RPrefix
-        M_I2C_Start
-        lda LCD_I2C_ADDRESS_R
-        jsr I2C_SendByte
+.macro LCD_I2C_Prefix
+        I2C_Prefix W2A          ; +334
+.endmacro
+
+.macro LCD_I2C_Restart_W
+        I2C_Restart W2A
+.endmacro
+
+.macro LCD_I2C_Restart_R
+        I2C_Restart R2A
 .endmacro
 
 ;;;
@@ -49,9 +52,9 @@ ilcd_set_address:
         rts
 
 .macro STROBE_A_THROUGH
-        jsr I2C_SendByte
-        eor #LCD_EN
-        jsr I2C_SendByte
+        jsr I2C_SendByte        ; 315
+        eor #LCD_EN             ; +2
+        jsr I2C_SendByte        ; +315 = 632
 .endmacro
 
 ; ---------------------------------------------
@@ -63,8 +66,8 @@ ilcd_init:
         ;; 2) 4-bit mode, no pending nibble.
         ;; 3) 4-bit mode, pending nibble, where prior nibble was the
         ;; command to switch to 8-bit mode.
-        ;; 4) 4-bit mode, pending nibble, prior nibble was not a
-        ;; command to switch to 8-bit mode
+        ;; 4) 4-bit mode, pending nibble, prior nibble was %0000
+        ;; 5) 4-bit mode, any other prior nibble.
 
         LCD_I2C_Prefix
         lda #(%00110000|LCD_EN) ; set 8-bit mode
@@ -87,15 +90,13 @@ ilcd_init:
 
         lda #%00000001
         jsr ilcd_instruction ; clear display
-        jsr ilcd_wait
 
         lda #%00000110
-        jsr ilcd_instruction ; Increment ap on writes, do not shift display
+        jsr ilcd_instruction ; Increment ap on writes, no SHIFT display
 
-        lda #%00001101
-        jsr ilcd_instruction ; Turn display back on
-
-        rts
+        lda #%00001110
+        jmp ilcd_instruction ; Turn display back on, with cursor visible
+        ;; implicit return
 
 @init_failed:
         jsr I2C_Clear
@@ -104,20 +105,15 @@ ilcd_init:
 
 ilcd_cursor_off:
         lda #%00001100
-        jsr ilcd_instruction
-        rts
+        jmp ilcd_instruction
 
 ilcd_home:
         lda #%00000010
-        jsr ilcd_instruction
-        jsr ilcd_wait
-        rts
+        jmp ilcd_instruction
 
 ilcd_clear:
         lda #%00000001
-        jsr ilcd_instruction
-        jsr ilcd_wait
-        rts
+        jmp ilcd_instruction
 
 ; ---------------------------------------------
 ; A contains instruction to send
@@ -125,7 +121,7 @@ ilcd_clear:
 ; ---------------------------------------------
 ilcd_instruction:
         sta INST                ; save full instruction
-        ;; jsr ilcd_wait
+        jsr ilcd_wait
         LCD_I2C_Prefix
         lda INST                ; fetch instruction
         and #$f0                ; clear low nibble
@@ -145,30 +141,23 @@ ilcd_instruction:
 ; A contains data to send
 ; RS = 1, RW = 0
 ; ---------------------------------------------
-.macro ILCD_WRITE_CHAR REGETCH
-        and #$f0
-        ora #(LCD_RS|LCD_EN|LCD_BT)
-        STROBE_A_THROUGH
-        REGETCH
-        asl
-        asl
-        asl
-        asl
-        ora #(LCD_RS|LCD_BT|LCD_EN)
-        STROBE_A_THROUGH
-.endmacro
-
-.macro INST2A
-        lda INST
-.endmacro
-
 ilcd_write_char:
-        sta INST
-        LCD_I2C_Prefix
-        lda INST
-        ILCD_WRITE_CHAR INST2A
-        M_I2C_Stop
-        rts
+        pha                     ; +3
+        LCD_I2C_Prefix          ; +334=337
+        pla                     ; +4=341
+        pha                     ; +3=344
+        and #$f0                ; +2=346
+        ora #(LCD_RS|LCD_EN|LCD_BT) ; +2=348
+        STROBE_A_THROUGH        ; +632=980
+        pla                     ; +4=984
+        asl                     ; +2=986
+        asl                     ; +2=988
+        asl                     ; +2=990
+        asl                     ; +2=992
+        ora #(LCD_RS|LCD_BT|LCD_EN) ; +2=994
+        STROBE_A_THROUGH        ; +632=1626
+        M_I2C_Stop              ; +22=1648
+        rts                     ; +12=1660
 
 ;;; ---------------------------------------------
 ;;; Send a string of text to the LCD Display
@@ -176,25 +165,32 @@ ilcd_write_char:
 ;;; Y = msg high byte
 ;;; ---------------------------------------------
 
-.macro LSYCH
-        lda (LCD_STRPTR),y
-.endmacro
-
 ilcd_print_string:
-        sta LCD_STRPTR
-        sty LCD_STRPTR + 1
-        ldy #0
-        LCD_I2C_Prefix
+        sta LCD_STRPTR          ; +3
+        sty LCD_STRPTR + 1      ; +3=6
+        jsr ilcd_wait           ; however long...
+        ldy #0                  ; 2
+        LCD_I2C_Prefix          ; > 300 cycles since it sends a full byte
         lda (LCD_STRPTR),y
-        beq @end_lcd_message
+        beq @done
 @loop:
-        ILCD_WRITE_CHAR LSYCH
-        iny
-        lda (LCD_STRPTR),y
-        bne @loop
-@end_lcd_message:
-        M_I2C_Stop              ; valid - I guess!
-        rts
+        pha                         ; +3
+        and #$f0                    ; +2
+        ora #(LCD_RS|LCD_EN|LCD_BT) ; +2
+        STROBE_A_THROUGH            ; +632=639
+        pla                         ; +4=643
+        asl                         ; +2
+        asl                         ; +2
+        asl                         ; +2
+        asl                         ; +2
+        ora #(LCD_RS|LCD_BT|LCD_EN) ; +2=653
+        STROBE_A_THROUGH            ; +632=1285
+        iny                         ; +2
+        lda (LCD_STRPTR),y          ; +4=1291
+        bne @loop                   ; +3 (taken, 2 otherwise) = =1294 per char
+@done:
+        M_I2C_Stop              ; +22
+        rts                     ; +12
 
 
 ;;; ------------------------------------------------
@@ -205,26 +201,31 @@ ilcd_read_ac:
         LCD_I2C_Prefix
         lda #RCMD
         jsr I2C_SendByte
+
         eor #(%11110000|LCD_EN)
         jsr I2C_SendByte
-        LCD_I2C_RPrefix
+
+        LCD_I2C_Restart_R
         jsr I2C_ReadHi4
         asl
         asl
         asl
         asl
         sta LCD_STRPTR
-        jsr I2C_SendNak
-        LCD_I2C_Prefix          ; switch again to write
+        jsr I2C_SendNak         ; this finishes data high
+
+        LCD_I2C_Restart_W       ; switch again to write
         lda #RCMD
         jsr I2C_SendByte
         eor #(%11110000|LCD_EN)
         jsr I2C_SendByte
-        LCD_I2C_RPrefix         ; switch again to read
+
+        LCD_I2C_Restart_R         ; switch again to read
         jsr I2C_ReadHi4
         pha                     ; save low nibble on stack
         jsr I2C_SendNak
-        LCD_I2C_Prefix          ; switch again to write
+
+        LCD_I2C_Restart_W       ; switch again to write
         lda #RCMD
         jsr I2C_SendByte
         ;; jsr I2C_Stop            ; phew!
@@ -237,28 +238,18 @@ ilcd_read_ac:
 
 ilcd_wait:
 @spin:
-        jsr ilcd_readbusy
-        bpl @done
-        phy
-        lda #< busyspin
-        ldy #> busyspin
-        jsr STROUT
-        ply
-        jmp @spin
-@done:
-        rts
-
-ilcd_readbusy:
         LCD_I2C_Prefix
         lda #RCMD
         jsr I2C_SendByte
-        ora #(%10000000|LCD_EN)
+        ora #(%11110000|LCD_EN)
         jsr I2C_SendByte
-        LCD_I2C_RPrefix
+
+        LCD_I2C_Restart_R
         jsr I2C_ReadHi4
         pha
         jsr I2C_SendNak
-        LCD_I2C_Prefix
+
+        LCD_I2C_Restart_W
         lda #RCMD
         jsr I2C_SendByte        ; E DOWN
         ora #LCD_EN
@@ -269,41 +260,100 @@ ilcd_readbusy:
         asl
         asl
         asl
+        bmi @spin
         rts
 
         ;; used to set position #$40 is useful for going to start of second line
 ilcd_set_position:
         ora #%10000000
-        jsr ilcd_instruction
-        rts
+        jmp ilcd_instruction
+ilcd_shift_left:
+        lda #%00011000
+        jmp ilcd_instruction
+ilcd_shift_right:
+        lda #%00011100
+        jmp ilcd_instruction
+ilcd_cursor_left:
+        lda #%00010000
+        jmp ilcd_instruction
+ilcd_cursor_right:
+        lda #%00010100
+        jmp ilcd_instruction
 
+;;;
+;;; The character index is in A
+;;; The pointer at VALUE points to 8-bytes of bitmap data
+;;; to be transferred to the CGRAM
+;;;
 ilcd_create_char:
         asl                     ; multiply by 8
         asl
         asl
         ora #$40                ; LCD_SETCGRAMADDR
-        jsr ilcd_instruction
+        jsr ilcd_instruction    ; this forces a wait
         phy
         ldy #0
 @loop:
-        lda (LCD_CC_ADDRESS),y
+        lda (value),y
         jsr ilcd_write_char
         iny
         cpy #8
         bcc @loop
+
+        lda #0
+        jsr ilcd_set_position
+
         ply
         rts
 
-ilcd_send_one_nibble:
-        ;; this is to deliberately put the device into the one-off state to
-        ;; test the initialization procedure:
-        lda #%00001000          ; turn display off
-        jsr ilcd_instruction
+;;;
+;;; For testing - put the LCD into one of 5 flavors of corrupted state
+;;; to test that ilcd_init can get it back into action.
+;;; The value in A determines the flavor:
+;;; 0 - full command to switch into 8-bit mode
+;;; 1 - half-command starting as a switch to 8-bit mode
+;;; 2 - half-command with a %0000 prefix
+;;; 3 - half-command with another prefix innocuous
+;;; * - do nothing
+
+ilcd_half_cmd:
+        pha
         LCD_I2C_Prefix
-        lda #(%00100000|LCD_EN)
+        pla
+        ora #LCD_EN
         STROBE_A_THROUGH
         M_I2C_Stop
         rts
 
-.rodata
-busyspin: .asciiz "BSPIN!\r\n"
+ilcd_corrupt_state:
+        cmp #0
+        bne @check2
+
+        ;; put into 8-bit mode, 2-line, same stuff
+        lda #%00111000
+        jmp ilcd_instruction
+
+@check2:
+        dec
+        bne @check3
+        ;; cmd to go to dangling with 8-bit mode switch pending
+        lda #%00110000
+        jmp ilcd_half_cmd
+
+@check3:
+        dec
+        bne @check4
+        ;; put into 4-bit dangling mode, with a %0000 prefix
+        ;; so that the init command causes a HOME command.
+        lda #%00000000
+        jmp ilcd_half_cmd
+
+@check4:
+        dec
+        bne @done
+        ;; innocuous command to switch to 4-bit
+        lda #%00100000
+        jmp ilcd_half_cmd
+
+@done:
+        rts
