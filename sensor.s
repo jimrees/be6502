@@ -26,6 +26,7 @@ ALLSYSCALL .global
 
 .include "libi2c_defs.s"
 .include "libilcd_defs.s"
+.include "ansi_defs.s"
 
         lcd_instruction = $a162
 
@@ -44,7 +45,6 @@ integral_temp:    .res 1
 decimal_temp:     .res 1
 sensor_checksum:  .res 1
 correct_checksum: .res 1
-timeout_target:   .res 1
 loop_counter:     .res 1
 divisor:          .res 1
 value2:           .res 1
@@ -59,7 +59,6 @@ DHT_MASK = (1<<DHT_PIN)
 start:
         jmp init
 
-
 premessage:     .asciiz "Good Morning"
 message:        .asciiz "Temperature & RH"
 timeout_message: .asciiz "TIMEOUT "
@@ -71,6 +70,7 @@ hours:         .asciiz " hours, "
 minutes:         .asciiz " minutes, and "
 seconds:         .asciiz " seconds.\r\n"
 press_key_to_continue:  .asciiz "Press any key to continue..."
+ca2_condition_triggered: .asciiz "CA2 Edge Triggered\r\n"
 
 .macro PAUSE_FOR_KEYPRESS
 .local @spin, @continue
@@ -272,12 +272,14 @@ dht_readRawData:
         sta sensorbytes+3
         sta sensorbytes+4
 
+        ;; Serial input will be disabled anyway - tell the other end not to send
+        ;; anything to avoid losing bytes.
         lda #80
         jsr set_forced_rtsb
 
-        ;; Initiate the request with a long down pulse (>= 18ms)
+        ;; Initiate the request with a down pulse (>= 18ms for DHT11, > 1ms for DHT22 )
         lda #DHT_MASK         ; pin.mode = OUTPUT
-        tsb DDRA                ; so ONLY that pin is outout
+        tsb DDRA              ; so ONLY that pin is outout
 
         ;; we only need 1ms delay, but here's 10ms
         lda #1
@@ -288,64 +290,44 @@ dht_readRawData:
         ;; then 80-120 x 40 after that 200 + 4800 = 5000us total max
         ;; set a target time (4-byte?) after the release and sample as we go:
 
-        lda #$01
-        sta IFR                 ; clear the current CA2 condition
-
         ldy #(256-42)           ; down-edge counter
 
-        sei
+        sei                     ; we don't want interrupts to delay sampling of downedges
 
-        ;; 5000us total should be the max.  Timeout at ~8192
+        ;; 42 downedges expected * ~95 us per = 3990
+        ;; So, 4096 should be plenty?
+
         sec
         lda T1CH
-        sbc #(8192/256)         ; plenty of time
-        sta timeout_target
+        sbc #17      ; 17 * 256 = 4096 + 256
+        bcs @ok      ; still have the carry bit - no correction needed
+        clc          ;
+        adc #39      ; modulo correction
+@ok:
+        tax                     ; store target here
 
         lda #DHT_MASK
         trb DDRA                ; release and let the pull up happen
 
 @next_bit:
-
-.if 0
-;;; Alternative method - skip the extra wire to CA2.  Just spin on the
-;;; value on Pin #7.
-;;; Be careful -- we have to be "on it" as each half of the pulse is
-;;; that much shorter -- the up-part of a first bit is only 26 us!
-@spin_until_up:
-        lda #DHT_MASK
-        bit PORTA
-        bne @spin_up_reached
-        lda T1CH
-        cmp timeout_target
-        bne @spin_until_up
-        jmp @timeout
-
-@spin_up_reached:
-@spin_until_down:
-        lda #DHT_MASK
-        bit PORTA
-        beq @downspin_reached
-        lda T1CH
-        cmp timeout_target
-        bne @spin_until_down
-        jmp @timeout
-@downspin_reached:
-.else
-
+        lda #$01
+        sta IFR                 ; clear the condition
 @spin_until_ca2:
-        lda T1CH
-        cmp timeout_target
+        cpx T1CH                ; have we reached the timeout
         beq @timeout
-        lda #01
+        bit IFR
+        bne @ca2_triggered
         bit IFR
         beq @spin_until_ca2
-        sta IFR                 ; clear the condition
-.endif
 
-        lda T1CL                ; sample the timer 4 (14) (this clear interrupt)
+@ca2_triggered:
+        lda T1CL                ; sample the timer 4 (14) (this also clears the timer condition)
         sta ca2_buffer-256+42,y ; push into buffer 4 (18)
         iny                     ; decrement edge counter 2 (22)
         bne @next_bit           ; keep looping 3 (25)
+
+        lda #$01                ; Clear the final condition
+        sta IFR
 
         cli                     ; restore interrupts
 
@@ -360,7 +342,17 @@ dht_readRawData:
 @bitloop:
         sec
         sbc ca2_buffer,y
-        cmp #99
+
+.if 0                           ; debugging - print the intervals
+        pha
+        sta value
+        stz value+1
+        jsr serial_print_value_in_decimal
+        jsr SERIAL_CRLF
+        pla
+.endif
+
+        cmp #93                 ; discriminator
         lda ca2_buffer,y        ; for next pass
         iny                     ; 'consume'
         rol sensorbytes+5,x     ; negative index works in zeropage
@@ -400,9 +392,34 @@ dht_readRawData:
         lda #$ff                ; return timeout, try again
         rts
 
+;;; Debugging
+;;; Check if the CA2 condition has triggered when it should not have.
+;;; I occassionally get checksum failures and I do not know why - so
+;;; I wonder if the I2C code might be messing with PORTA.7
+check_ca2:
+        lda #01
+        bit IFR
+        beq @done
+        sta IFR
+        SERIAL_PSTR ca2_condition_triggered
+@done:
+        rts
+
 ;;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 init:
+        ;; Enable CA2 downedge
+        ;; Note that we're not turning on CA2 interrupts.
+        sei
+        lda PCR
+        and #%11110001          ; preserve everything that is not CA2
+        ora #%00000010          ; enable the CA2 downedge independent mode
+        sta PCR
+        cli
+
+        jsr check_ca2
+
+        jsr ansi_init
         ;; zero out ORA while DDRA is also zero.
         jsr I2C_Init
 
@@ -435,18 +452,18 @@ init:
         stz loop_counter
 
         jsr SERIAL_CRLF
-
-        ;; Enable CA2 downedge
-        ;; Note that we're not turning on CA2 interrupts.
-        sei
-        lda PCR
-        and #%11110001          ; preserve everything that is not CA2
-        ora #%00000010          ; enable the CA2 downedge independent mode
-        sta PCR
-        cli
-
         jsr both_clear
         BOTH_PSTR premessage
+
+        lda #4                  ; 4 is red
+        ldy #0                  ; 0 is black
+        jsr ansi_setcolor
+
+        SERIAL_PSTR premessage
+        jsr ansi_restore_color
+        jsr SERIAL_CRLF
+
+        jsr check_ca2
 
 @loop:
         lda #%00001110          ; display on, cursor on, blink off
@@ -478,6 +495,7 @@ init:
         dex
         bne @curleftloop
 
+        ;; jsr ansi_clearscr
         jsr both_clear
 
         lda #$10
@@ -488,8 +506,7 @@ init:
         lda #$50
         jsr both_set_position
 
-        lda #50
-        jsr delayticks
+        jsr check_ca2
 
         jsr dht_readRawData
         bpl @no_timeout_error
@@ -558,6 +575,14 @@ init:
         jsr both_value_in_decimal
         lda #' '
         jsr print_char_to_all
+
+        lda correct_checksum
+        sta value
+        stz value+1
+        jsr serial_print_value_in_decimal
+        lda #' '
+        jsr CHROUT
+
         jmp @show_loop_char
 
 @timeout_error:
@@ -573,8 +598,12 @@ init:
 
         lda loopchars,x
         jsr print_char_to_lcds
+        lda #2
+        ldy #0
+        jsr ansi_setcolor
         lda serial_loopchars,x
         jsr CHROUT
+        jsr ansi_restore_color
 
         lda #1                  ; the hash mark
         jsr print_char_to_lcds
@@ -587,6 +616,8 @@ init:
         jsr delayticks
         dey
         bne @ipadloop
+
+        jsr check_ca2
 
         jsr report_uptime
 

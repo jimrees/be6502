@@ -15,6 +15,6 @@ BIOS_DEFS_S := 1
 .global STROUT
 .global set_forced_rtsb
 .global WOZSTART
-.globalzp tmp0, tmp1, tmp2, tmp3, txDelay
+.globalzp txDelay
 
 .endif
