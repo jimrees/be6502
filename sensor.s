@@ -294,6 +294,9 @@ dht_readRawData:
 
         sei                     ; we don't want interrupts to delay sampling of downedges
 
+        ;; But we will lose timer interrupts because we cannot sample the low-order
+        ;; counter without clearing the condition.
+
         ;; 42 downedges expected * ~95 us per = 3990
         ;; So, 4096 should be plenty?
 
@@ -301,8 +304,7 @@ dht_readRawData:
         lda T1CH
         sbc #17      ; 17 * 256 = 4096 + 256
         bcs @ok      ; still have the carry bit - no correction needed
-        clc          ;
-        adc #39      ; modulo correction
+        adc #x27     ; the tick period is #x2710 cycles, we load with #x270E
 @ok:
         tax                     ; store target here
 
@@ -314,16 +316,14 @@ dht_readRawData:
         sta IFR                 ; clear the condition
 @spin_until_ca2:
         cpx T1CH                ; have we reached the timeout
-        beq @timeout
-        bit IFR
-        bne @ca2_triggered
+        beq @timeout            ; only when we have an exact match do we call it a timeout.  The duration of the #x39
         bit IFR
         beq @spin_until_ca2
 
 @ca2_triggered:
         lda T1CL                ; sample the timer 4 (14) (this also clears the timer condition)
         sta ca2_buffer-256+42,y ; push into buffer 4 (18)
-        iny                     ; decrement edge counter 2 (22)
+        iny                     ; increment edge counter 2 (22)
         bne @next_bit           ; keep looping 3 (25)
 
         lda #$01                ; Clear the final condition

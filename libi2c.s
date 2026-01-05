@@ -44,8 +44,8 @@ ZP_I2C_DATA:    .res 1
 ;;;------------------------------------------------------------------------------
 ;;; Destroys A, 8 cycles
 ;;;------------------------------------------------------------------------------
-        lda   #I2C_CLOCKBIT
-        tsb   I2C_DDR
+        lda   #I2C_CLOCKBIT     ; +2
+        tsb   I2C_DDR           ; +6
 .endmacro
 
 ;------------------------------------------------------------------------------
@@ -69,6 +69,36 @@ ZP_I2C_DATA:    .res 1
         ora   #I2C_CLOCKBIT          ; CLOCK DOWN +2 = 12
         sta   I2C_DDR                ; +4 = 16 ;-(
 .endif
+.endmacro
+
+;------------------------------------------------------------------------------
+    .macro A_bit_to_C MASK
+;------------------------------------------------------------------------------
+;;; Destroys A
+;;; Returns next input in C
+;;; It shifts A the # times needed to move the correct bit from A into C.
+;;; It is assumed MASK is a power of two, or zero
+;------------------------------------------------------------------------------
+.if MASK == 0
+.else
+.if MASK <= 8
+        lsr                     ; +2
+        A_bit_to_C (MASK/2)
+.else
+        asl
+        A_bit_to_C ((MASK*2)&255)
+.endif
+.endif
+
+;------------------------------------------------------------------------------
+    .macro i2c_input_bit_to_C
+;------------------------------------------------------------------------------
+;;; Destroys A, N, Z
+;;; Returns next input in C
+;;; It shifts A the # times needed to move the database into C.
+;------------------------------------------------------------------------------
+        lda I2C_PORT            ; +4
+        A_bit_to_C I2C_DATABIT  ; +2=6, for I2C_DATABIT==1
 .endmacro
 
 ;------------------------------------------------------------------------------
@@ -105,24 +135,12 @@ I2C_SendNak:
 ;------------------------------------------------------------------------------
 I2C_ReadAck:
 ;------------------------------------------------------------------------------
-;;; Ack in carry flag (clear means ack, set means nak)
+;;; Returns Ack in carry flag (clear means ack, set means nak)
 ;;; Destroys A
 ;------------------------------------------------------------------------------
         i2c_data_up             ; +8
         i2c_clock_up            ; +8
-.if I2C_DATABIT = 1
-        ;; Saves 5 or 6 cycles
-        ;; databit ==> C
-        lda I2C_PORT            ; +4
-        ror                     ; +2
-.else
-        clc                 ; Clear the carry +2
-        lda I2C_PORT        ; Load data from the port +4
-        and #I2C_DATABIT    ; Test the data bit +2
-        beq @skip           ; If zero skip +{2,3}
-        sec                 ; Set carry if not zero +2
-@skip:
-.endif
+        i2c_input_bit_to_C      ; +6
         i2c_clock_down      ; Bring the clock down, +8, 30 + 12
         rts
 
@@ -168,6 +186,7 @@ I2C_Clear:
 I2C_SendByte:
 ;;;------------------------------------------------------------------------------
 ;;; Sends the byte in A
+;;; Returns the Ack in C (clear means ack, set means nak)
 ;;; Preserves A,X,Y - sets C
 ;;;------------------------------------------------------------------------------
         pha                     ; +3
@@ -178,7 +197,7 @@ I2C_SendByte:
         ;; The prior operation had to be an ACK/NAK or a start
         ;; the known initial value of data is HIGH (released)
 @hiloop:
-        asl ZP_I2C_DATA         ; 2
+        asl ZP_I2C_DATA         ; 5
         bcc @switch_to_low      ; 3 if taken
         i2c_clock_pulse         ; 14
         dex                     ; 2
@@ -186,7 +205,7 @@ I2C_SendByte:
         jmp @finish             ; 3
 
 @loloop:
-        asl ZP_I2C_DATA         ; 2
+        asl ZP_I2C_DATA         ; 5
         bcs @switch_to_high     ; 3 if taken
         i2c_clock_pulse         ; 14
         dex                     ; 2
@@ -221,65 +240,42 @@ I2C_ReadByte:
 ;;;------------------------------------------------------------------------------
         ;; data must already be up
         ;; i2c_data_up             ; Make sure we're not holding the data line down.
-        lda #I2C_CLOCKBIT       ; Load the clock bit in for initial loop
+        lda #I2C_CLOCKBIT       ; +2 Load the clock bit in for initial loop
 .macro RB_SINGLESTEP
-.local skip
-        trb I2C_DDR             ; clock up
-        clc
-        lda #I2C_DATABIT
-        bit I2C_PORT            ; check databit
-        beq skip
-        sec
-skip:   rol ZP_I2C_DATA
-        i2c_clock_down
-        ;; nop
-        ;; nop
+        trb I2C_DDR             ; clock up, +6
+        i2c_input_bit_to_C      ; +6
+        rol ZP_I2C_DATA         ; +5
+        i2c_clock_down          ; +8 guarantees I2C_CLOCKBIT in A again, 25 total
 .endmacro
-        DOTIMES RB_SINGLESTEP,8
-        lda ZP_I2C_DATA         ; Load A from local
-        rts
+        DOTIMES RB_SINGLESTEP,8 ; +25*8 = 202
+        lda ZP_I2C_DATA         ; +4=206 Load A from local
+        rts                     ; ?
 
 ;;;------------------------------------------------------------------------------
 I2C_ReadHi4:
 ;;;------------------------------------------------------------------------------
-;;; Start with clock low.  Ends with byte in A.  Do ACK separately.
-;;; Trashes the X register too.
+;;; Start with clock low.  Ends with bits in low part of A.  Do ACK separately.
 ;;;------------------------------------------------------------------------------
         ;; the thing prior to ReadHi4 was either a previous NAK or a previous
         ;; ack by the slave of the address.   In both cases, data line must be
         ;; up - so there's no need to do it again.
-        ;; i2c_data_up             ; Make sure we're not holding the data line down.
-        lda #I2C_CLOCKBIT       ; Load the clock bit in for initial loop
-.macro RH4_SINGLESTEP
-.local skip
-        trb I2C_DDR             ; clock up
-        clc
-        lda #I2C_DATABIT
-        bit I2C_PORT            ; check databit
-        beq skip
-        sec
-skip:   rol ZP_I2C_DATA
-        i2c_clock_down
-        ;; nop
-        ;; nop
-.endmacro
-        DOTIMES RH4_SINGLESTEP,4
-        ;; now just pulse the clock 4 times - this hack here saves 8 cycles over
-        ;; just doing trb/tsb, but trashes X
+        lda #I2C_CLOCKBIT       ; +2 Pre-load the clock bit in for initial loop
+        DOTIMES RB_SINGLESTEP,4 ; +4*25=102
+
 .if 1
-        ;;phx                        ; +3
-        lda I2C_DDR                ; +4
-        and #(~I2C_CLOCKBIT & $ff) ; +2
-        tax                        ; +2
-        sta I2C_DDR                ; -2 (4 cycles vs 6 for tsb)
-        stx I2C_DDR                ; -2
-        sta I2C_DDR                ; -2
-        stx I2C_DDR                ; -2
-        sta I2C_DDR                ; -2
-        stx I2C_DDR                ; -2
-        sta I2C_DDR                ; -2
-        stx I2C_DDR                ; -2
-        ;plx                        ; +4
+        phx                        ; +3
+        lda I2C_DDR                ; +4=106
+        and #(~I2C_CLOCKBIT & $ff) ; +2=108
+        tax                        ; +2=110
+        sta I2C_DDR                ; +4=114
+        stx I2C_DDR                ; +4=118
+        sta I2C_DDR                ; +4=122
+        stx I2C_DDR                ; +4=126
+        sta I2C_DDR                ; +4=130
+        stx I2C_DDR                ; +4=134
+        sta I2C_DDR                ; +4=138
+        stx I2C_DDR                ; +4=142
+        plx                        ; +4=149
 .else
         trb I2C_DDR
         tsb I2C_DDR
@@ -288,9 +284,9 @@ skip:   rol ZP_I2C_DATA
         trb I2C_DDR
         tsb I2C_DDR
         trb I2C_DDR
-        tsb I2C_DDR
+        tsb I2C_DDR             ; +6x8 = 150
 .endif
-        lda ZP_I2C_DATA            ; Load A from local
+        lda ZP_I2C_DATA         ; +3=152 Load A from local
         rts
 
 ;;;------------------------------------------------------------------------------
