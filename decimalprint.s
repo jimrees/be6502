@@ -7,46 +7,40 @@
 
 .code
 ;;; Dividend in value, value+1
-;;; Result quotient in value,value+1 + mod10,mod10+1
+;;; Result quotient in value,value+1 + mod10
 ;;; Modifies flags, value, mod10
 divide_by_10:
         pha
         phx
-        phy
         ;; Initialize remainder to zero
-        stz mod10
-        stz mod10 + 1
-        clc
-
-        ldx #16
+        lda #0
+        ;; pre-shift 3x
+        asl value
+        rol value+1
+        rol
+        asl value
+        rol value+1
+        rol
+        asl value
+        rol value+1
+        rol
+        ldx #13
 @divloop:
         ;; Rotate quotient & remainder
-        rol value
-        rol value + 1
-        rol mod10
-        rol mod10 + 1
-
-        ;;  a,y = dividend - divisor
-        sec
-        lda mod10
-        sbc #10
-        tay                     ; stash low byte in y
-        lda mod10 + 1
-        sbc #0
-        bcc @ignore_result       ; dividend < divisor
-        sty mod10
-        sta mod10 + 1
+        rol value               ; rol the carry bit from the last loop in
+        rol value+1
+        rol                     ; A holds the mod
+        cmp #10
+        bcc @ignore_result      ; carry clear means borrow would have occurred
+        sbc #10                 ; still leaves carry set
 @ignore_result:
         dex
         bne @divloop
-
         rol value               ; final rotate
         rol value+1
-        ply
         plx
         pla
         rts
-
 
 ;;; value must contain the number
 ;;; A,X,Y will all be trashed.

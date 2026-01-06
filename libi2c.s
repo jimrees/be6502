@@ -190,46 +190,44 @@ I2C_SendByte:
 ;;; Preserves A,X,Y - sets C
 ;;;------------------------------------------------------------------------------
         pha                     ; +3
-        phx                     ; +3
+
+        ;; only the DDR is manipulated
+        ;; change the databit, write to port
+        ;; change the clock bit (if needed)
+        ;; change it back
+
         sta ZP_I2C_DATA         ; stash +3
+        lda I2C_DDR             ; pre-fetch
 
-        ldx #8   ; +2 = 11
-        ;; The prior operation had to be an ACK/NAK or a start
-        ;; the known initial value of data is HIGH (released)
-@hiloop:
-        asl ZP_I2C_DATA         ; 5
-        bcc @switch_to_low      ; 3 if taken
-        i2c_clock_pulse         ; 14
-        dex                     ; 2
-        bne @hiloop             ; 3 if taken
-        jmp @finish             ; 3
+.macro SENDONEBIT
+.local send_zero
+.local do_pulse
+        asl ZP_I2C_DATA             ; +5
+        bcc send_zero               ; +2/3
+        and #(~I2C_DATABIT & #xff)  ; +2
+        sta I2C_DDR                 ; +4
+        bra do_pulse                ; +2/3
+send_zero:
+        ora #I2C_DATABIT            ; +2
+        sta I2C_DDR                 ; +4
+do_pulse:
+        and #(~I2C_CLOCKBIT & #xff) ; +2
+        sta I2C_DDR                 ; +4
+        ora #I2C_CLOCKBIT           ; +2
+        sta I2C_DDR                 ; +4
+.endmacro
 
-@loloop:
-        asl ZP_I2C_DATA         ; 5
-        bcs @switch_to_high     ; 3 if taken
-        i2c_clock_pulse         ; 14
-        dex                     ; 2
-        bne @loloop             ; 3 if taken
-        jmp @finish             ; 3
+        DOTIMES 8,SENDONEBIT
+        ;; Now to read the ACK, release the dataline, then pulse the clock
+        and #(~I2C_DATABIT & #xff)  ; release, as if sending 1
+        sta I2C_DDR
+        and #(~I2C_CLOCKBIT & #xff) ; +2
+        sta I2C_DDR                 ; +4
+        i2c_input_bit_to_C          ; +6
+        lda I2C_DDR
+        ora #I2C_CLOCKBIT           ; clock down
+        sta I2C_DDR
 
-@switch_to_low:
-        lda #I2C_DATABIT        ; 2
-        tsb I2C_DDR             ; 6
-        i2c_clock_pulse         ; 14
-        dex                     ; 2
-        bne @loloop             ; 3 if taken
-        jmp @finish             ; 3
-
-@switch_to_high:
-        lda #I2C_DATABIT        ; 2
-        trb I2C_DDR             ; 6
-        i2c_clock_pulse         ; 14
-        dex                     ; 2
-        bne @hiloop             ; 3 if taken
-
-@finish:
-        jsr I2C_ReadAck         ; +42
-        plx                     ; +4
         pla                     ; +4
         rts                     ;
 
